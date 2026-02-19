@@ -4,7 +4,8 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import { PixelGrid } from "./pixel-grid"
 import { PixelPreview } from "./pixel-preview"
 import { FrameTimeline } from "./frame-timeline"
-import { Undo2, Redo2, Save, FolderOpen, Share2, X, Check, Trash2 } from "lucide-react"
+import { Undo2, Redo2, Save, FolderOpen, Share2, X, Check, Trash2, Download, FilePlus } from "lucide-react"
+import { encodeGIF } from "@/lib/gif-encoder"
 
 const STORAGE_KEY = "pixel-editor-settings"
 const SAVES_KEY = "pixel-editor-saves"
@@ -339,6 +340,7 @@ export function PixelEditor() {
   const [fps, setFps] = useState(5)
   const [copiedCSS, setCopiedCSS] = useState(false)
   const [copiedSVG, setCopiedSVG] = useState(false)
+  const [exportingGIF, setExportingGIF] = useState(false)
 
   // Save/Load state
   const [savedAnimations, setSavedAnimations] = useState<SavedAnimation[]>([])
@@ -470,11 +472,15 @@ export function PixelEditor() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return
-      if (e.key === "z" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      if (e.key === "z" && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         undo()
       }
-      if (e.key === "y" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      if (e.key === "y" && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        redo()
+      }
+      if (e.key === "z" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         redo()
       }
@@ -560,6 +566,21 @@ const handleExportCSS = useCallback(() => {
     })
   }, [width, height, frames, fps])
 
+  const handleExportGIF = useCallback(() => {
+    setExportingGIF(true)
+    setTimeout(() => {
+      const gif = encodeGIF(width, height, frames, fps)
+      const blob = new Blob([gif], { type: "image/gif" })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.download = `pixel-art-${width}x${height}.gif`
+      link.href = url
+      link.click()
+      URL.revokeObjectURL(url)
+      setExportingGIF(false)
+    }, 0)
+  }, [width, height, frames, fps])
+
   const handleExportSVG = useCallback(() => {
     const svg = generateSVG(width, height, frames, fps)
     navigator.clipboard.writeText(svg).then(() => {
@@ -622,6 +643,14 @@ const handleExportCSS = useCallback(() => {
       setTimeout(() => setCopiedShare(false), 2000)
     })
   }, [width, height, frames, fps])
+
+  const handleNew = useCallback(() => {
+    const newFrames = [createEmptyGrid(width, height)]
+    setFrames(newFrames)
+    setCurrentFrame(0)
+    historyRef.current = [{ frames: newFrames, currentFrame: 0 }]
+    historyIndexRef.current = 0
+  }, [width, height])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -713,6 +742,14 @@ const handleExportCSS = useCallback(() => {
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 256 256" className="flex-shrink-0"><path d="M87.82,196.31a20.82,20.82,0,0,1-9.19,15.23C73.44,215,67,216,61.14,216A61.23,61.23,0,0,1,46,214a8,8,0,0,1,4.3-15.41c4.38,1.2,14.95,2.7,19.55-.36.88-.59,1.83-1.52,2.14-3.93.35-2.67-.71-4.1-12.78-7.59-9.35-2.7-25-7.23-23-23.11a20.55,20.55,0,0,1,9-14.95c11.84-8,30.72-3.31,32.83-2.76a8,8,0,0,1-4.07,15.48c-4.48-1.17-15.23-2.56-19.83.56a4.54,4.54,0,0,0-2,3.67c-.11.9-.14,1.09,1.12,1.9,2.31,1.49,6.44,2.68,10.45,3.84C73.5,174.17,90.06,179,87.82,196.31ZM216,88v24a8,8,0,0,1-16,0V96H152a8,8,0,0,1-8-8V40H56v72a8,8,0,1,1-16,0V40A16,16,0,0,1,56,24h96a8,8,0,0,1,5.65,2.34l56,56A8,8,0,0,1,216,88Zm-56-8h28.69L160,51.31Zm-13.3,64.47a8,8,0,0,0-10.23,4.84L124,184.21l-12.47-34.9a8,8,0,1,0-15.06,5.38l20,56a8,8,0,0,0,15.07,0l20-56A8,8,0,0,0,146.7,144.47ZM208,176h-8a8,8,0,0,0,0,16v5.29a13.38,13.38,0,0,1-8,2.71c-8.82,0-16-9-16-20s7.18-20,16-20a13.27,13.27,0,0,1,7.53,2.38,8,8,0,0,0,8.95-13.26A29.38,29.38,0,0,0,192,144c-17.64,0-32,16.15-32,36s14.36,36,32,36a30.06,30.06,0,0,0,21.78-9.6,8,8,0,0,0,2.22-5.53V184A8,8,0,0,0,208,176Z"/></svg>
               <span>{copiedSVG ? "Copied!" : frames.length > 1 ? "Copy Animated SVG" : "Copy SVG"}</span>
             </button>
+            <button
+              onClick={handleExportGIF}
+              disabled={exportingGIF}
+              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50 disabled:pointer-events-none"
+            >
+              <Download className="h-3.5 w-3.5 flex-shrink-0" />
+              <span>{exportingGIF ? "Exporting…" : "Download GIF"}</span>
+            </button>
 
             <div className="my-1 h-px w-full bg-border" />
 
@@ -734,12 +771,12 @@ const handleExportCSS = useCallback(() => {
                 Load
               </button>
               <button
-                onClick={handleShareAnimation}
-                aria-label="Share link"
+                onClick={handleNew}
+                aria-label="New canvas"
                 className="flex flex-1 items-center justify-center gap-1.5 rounded border border-border bg-secondary px-2 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
               >
-                {copiedShare ? <Check className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}
-                {copiedShare ? "Copied!" : "Share"}
+                <FilePlus className="h-3.5 w-3.5" />
+                New
               </button>
             </div>
           </div>
@@ -777,6 +814,14 @@ const handleExportCSS = useCallback(() => {
             >
               <Redo2 className="h-3.5 w-3.5" />
             </button>
+            <button
+              onClick={handleShareAnimation}
+              aria-label="Share link"
+              className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+              title="Share"
+            >
+              {copiedShare ? <Check className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}
+            </button>
             <a
               href="https://github.com/lucasmotta/pixelator"
               target="_blank"
@@ -787,16 +832,7 @@ const handleExportCSS = useCallback(() => {
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/></svg>
             </a>
           </div>
-          {/* Keyboard hints */}
-          <div className="absolute bottom-4 left-4 hidden sm:flex items-center gap-1.5">
-            <kbd className="inline-flex items-center rounded border border-border bg-card/80 px-1.5 py-1 text-[10px] font-mono text-muted-foreground backdrop-blur-sm">
-              Shift: line
-            </kbd>
-            <kbd className="inline-flex items-center rounded border border-border bg-card/80 px-1.5 py-1 text-[10px] font-mono text-muted-foreground backdrop-blur-sm">
-              Z / Y: undo/redo
-            </kbd>
-          </div>
-          {/* Zoom */}
+{/* Zoom */}
           <div className="absolute bottom-4 right-4 flex items-center gap-2 rounded-lg border border-border bg-card/80 px-3 py-2 backdrop-blur-sm">
             <label className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Zoom</label>
             <input
