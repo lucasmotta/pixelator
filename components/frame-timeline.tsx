@@ -81,9 +81,10 @@ function FrameThumbnail({
       onClick={onClick}
       className={`group relative flex flex-col items-center gap-1 rounded p-1.5 transition-colors ${
         isActive
-          ? "bg-accent outline outline-1 outline-foreground/40"
+          ? "bg-accent"
           : "hover:bg-accent/50"
       }`}
+      style={isActive ? { outline: "1px solid rgba(255,255,255,0.4)", outlineOffset: "-1px" } : undefined}
     >
       <canvas
         ref={canvasRef}

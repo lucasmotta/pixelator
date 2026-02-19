@@ -1,19 +1,38 @@
 "use client"
 
-import { useRef, useEffect, useCallback } from "react"
+import { useRef, useEffect, useCallback, useState } from "react"
 
 interface PixelPreviewProps {
   width: number
   height: number
-  pixels: boolean[][]
+  frames: boolean[][][]
+  fps?: number
 }
 
 export function PixelPreview({
   width,
   height,
-  pixels,
+  frames,
+  fps = 5,
 }: PixelPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [animFrame, setAnimFrame] = useState(0)
+
+  // Cycle through frames when there are multiple
+  useEffect(() => {
+    if (frames.length <= 1) {
+      setAnimFrame(0)
+      return
+    }
+    const interval = setInterval(() => {
+      setAnimFrame((prev) => (prev + 1) % frames.length)
+    }, 1000 / fps)
+    return () => clearInterval(interval)
+  }, [frames.length, fps])
+
+  // Reset if animFrame is out of range
+  const safeFrame = animFrame < frames.length ? animFrame : 0
+  const pixels = frames[safeFrame] ?? []
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -21,13 +40,12 @@ export function PixelPreview({
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    // Render at exact pixel dimensions — no DPR scaling
     canvas.width = width
     canvas.height = height
     canvas.style.width = `${width}px`
     canvas.style.height = `${height}px`
 
-    // Transparent background (checkerboard at 1px)
+    // Checkerboard background
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const isLight = (x + y) % 2 === 0

@@ -102,8 +102,9 @@ function generateSingleFrameCSS(width: number, height: number, pixels: boolean[]
   ].join("\n")
 }
 
-function generateAnimatedCSS(width: number, height: number, frames: boolean[][][]): string {
+function generateAnimatedCSS(width: number, height: number, frames: boolean[][][], fps: number = 5): string {
   const n = frames.length
+  const frameDuration = Math.round(1000 / fps)
 
   const keyframeBlocks: string[] = []
   for (let i = 0; i < n; i++) {
@@ -132,7 +133,7 @@ function generateAnimatedCSS(width: number, height: number, frames: boolean[][][
 
   return [
     `--pixel-color: currentColor;`,
-    `--animation-speed: 200ms;`,
+    `--animation-speed: ${frameDuration}ms;`,
     `width: ${width}px;`,
     `height: ${height}px;`,
     `background-repeat: no-repeat;`,
@@ -162,6 +163,7 @@ export function PixelEditor() {
   const historyIndexRef = useRef(-1)
   const batchingRef = useRef(false)
 
+  const [fps, setFps] = useState(5)
   const [copiedCSS, setCopiedCSS] = useState(false)
 
   // Initialize from localStorage after mount
@@ -372,12 +374,12 @@ export function PixelEditor() {
     const css =
       frames.length === 1
         ? generateSingleFrameCSS(width, height, frames[0])
-        : generateAnimatedCSS(width, height, frames)
+        : generateAnimatedCSS(width, height, frames, fps)
     navigator.clipboard.writeText(css).then(() => {
       setCopiedCSS(true)
       setTimeout(() => setCopiedCSS(false), 2000)
     })
-  }, [width, height, frames])
+  }, [width, height, frames, fps])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -493,7 +495,24 @@ export function PixelEditor() {
             <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
               Preview ({width}x{height})
             </label>
-            <PixelPreview width={width} height={height} pixels={pixels} />
+            <PixelPreview width={width} height={height} frames={frames} fps={fps} />
+            {frames.length > 1 && (
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] font-mono text-muted-foreground">FPS</label>
+                <input
+                  type="range"
+                  min={1}
+                  max={24}
+                  step={1}
+                  value={fps}
+                  onChange={(e) => setFps(parseInt(e.target.value))}
+                  className="w-20 accent-foreground"
+                />
+                <span className="text-[10px] font-mono text-muted-foreground w-5 text-right">
+                  {fps}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Actions */}
