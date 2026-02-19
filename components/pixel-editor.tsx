@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import { PixelGrid } from "./pixel-grid"
 import { PixelPreview } from "./pixel-preview"
+import { FrameTimeline } from "./frame-timeline"
 import { Grid3x3, Trash2, Download, Undo2, Redo2, Code } from "lucide-react"
 
 const STORAGE_KEY = "pixel-editor-settings"
@@ -34,22 +35,29 @@ function saveSettings(width: number, height: number, cellSize: number) {
   } catch {}
 }
 
-function gridsEqual(a: boolean[][], b: boolean[][]): boolean {
+function framesEqual(a: boolean[][][], b: boolean[][][]): boolean {
   if (a.length !== b.length) return false
-  for (let y = 0; y < a.length; y++) {
-    if (a[y].length !== b[y].length) return false
-    for (let x = 0; x < a[y].length; x++) {
-      if (a[y][x] !== b[y][x]) return false
+  for (let f = 0; f < a.length; f++) {
+    if (a[f].length !== b[f].length) return false
+    for (let y = 0; y < a[f].length; y++) {
+      if (a[f][y].length !== b[f][y].length) return false
+      for (let x = 0; x < a[f][y].length; x++) {
+        if (a[f][y][x] !== b[f][y][x]) return false
+      }
     }
   }
   return true
 }
 
-function generateCssGradient(
+function cloneFrames(frames: boolean[][][]): boolean[][][] {
+  return frames.map((frame) => frame.map((row) => [...row]))
+}
+
+function generateCssGradientForFrame(
   width: number,
   height: number,
   pixels: boolean[][]
-): string {
+): { bgImages: string[]; bgPositions: string[]; bgSizes: string[] } {
   const bgImages: string[] = []
   const bgPositions: string[] = []
   const bgSizes: string[] = []
@@ -72,7 +80,13 @@ function generateCssGradient(
     }
   }
 
-  if (bgImages.length === 0) return "/* Empty canvas — no filled pixels */"
+  return { bgImages, bgPositions, bgSizes }
+}
+
+function generateSingleFrameCSS(width: number, height: number, pixels: boolean[][]): string {
+  const { bgImages, bgPositions, bgSizes } = generateCssGradientForFrame(width, height, pixels)
+
+  if (bgImages.length === 0) return "/* Empty canvas -- no filled pixels */"
 
   return [
     `--pixel-color: currentColor;`,
@@ -88,19 +102,67 @@ function generateCssGradient(
   ].join("\n")
 }
 
+function generateAnimatedCSS(width: number, height: number, frames: boolean[][][]): string {
+  const n = frames.length
+
+  const keyframeBlocks: string[] = []
+  for (let i = 0; i < n; i++) {
+    const pct = ((i / n) * 100).toFixed(4)
+    const { bgImages, bgPositions, bgSizes } = generateCssGradientForFrame(width, height, frames[i])
+
+    if (bgImages.length === 0) {
+      keyframeBlocks.push(
+        `  ${pct}% {\n    background-image: none;\n  }`
+      )
+    } else {
+      keyframeBlocks.push(
+        [
+          `  ${pct}% {`,
+          `    background-image:`,
+          `      ${bgImages.join(",\n      ")};`,
+          `    background-position:`,
+          `      ${bgPositions.join(",\n      ")};`,
+          `    background-size:`,
+          `      ${bgSizes.join(",\n      ")};`,
+          `  }`,
+        ].join("\n")
+      )
+    }
+  }
+
+  return [
+    `--pixel-color: currentColor;`,
+    `--animation-speed: 200ms;`,
+    `width: ${width}px;`,
+    `height: ${height}px;`,
+    `background-repeat: no-repeat;`,
+    `animation: pixel-animation calc(var(--animation-speed) * ${n}) steps(${n}) infinite;`,
+    ``,
+    `@keyframes pixel-animation {`,
+    ...keyframeBlocks,
+    `}`,
+  ].join("\n")
+}
+
 export function PixelEditor() {
   const [mounted, setMounted] = useState(false)
   const [width, setWidth] = useState(16)
   const [height, setHeight] = useState(16)
   const [inputWidth, setInputWidth] = useState("16")
   const [inputHeight, setInputHeight] = useState("16")
-  const [pixels, setPixels] = useState<boolean[][]>(() => createEmptyGrid(16, 16))
   const [cellSize, setCellSize] = useState(24)
 
-  // Undo / Redo
-  const historyRef = useRef<boolean[][][]>([])
+  // Frames
+  const [frames, setFrames] = useState<boolean[][][]>(() => [createEmptyGrid(16, 16)])
+  const [currentFrame, setCurrentFrame] = useState(0)
+  const [ghostEnabled, setGhostEnabled] = useState(true)
+
+  // Undo / Redo — tracks { frames, currentFrame } snapshots
+  const historyRef = useRef<{ frames: boolean[][][]; currentFrame: number }[]>([])
   const historyIndexRef = useRef(-1)
   const batchingRef = useRef(false)
+
+  const [copiedCSS, setCopiedCSS] = useState(false)
 
   // Initialize from localStorage after mount
   useEffect(() => {
@@ -110,9 +172,10 @@ export function PixelEditor() {
     setInputWidth(String(s.width))
     setInputHeight(String(s.height))
     setCellSize(s.cellSize)
-    const grid = createEmptyGrid(s.width, s.height)
-    setPixels(grid)
-    historyRef.current = [grid]
+    const initialFrames = [createEmptyGrid(s.width, s.height)]
+    setFrames(initialFrames)
+    setCurrentFrame(0)
+    historyRef.current = [{ frames: initialFrames, currentFrame: 0 }]
     historyIndexRef.current = 0
     setMounted(true)
   }, [])
@@ -122,28 +185,35 @@ export function PixelEditor() {
     if (mounted) saveSettings(width, height, cellSize)
   }, [width, height, cellSize, mounted])
 
-  const pushHistory = useCallback((grid: boolean[][]) => {
+  const pushHistory = useCallback((newFrames: boolean[][][], newCurrentFrame: number) => {
     const idx = historyIndexRef.current
-    // Don't push if identical to current
-    if (idx >= 0 && gridsEqual(historyRef.current[idx], grid)) return
+    const current = historyRef.current[idx]
+    if (current && framesEqual(current.frames, newFrames) && current.currentFrame === newCurrentFrame) return
 
-    // Truncate any redo states ahead
     historyRef.current = historyRef.current.slice(0, idx + 1)
-    historyRef.current.push(grid)
+    historyRef.current.push({ frames: cloneFrames(newFrames), currentFrame: newCurrentFrame })
     if (historyRef.current.length > MAX_HISTORY) {
       historyRef.current.shift()
     }
     historyIndexRef.current = historyRef.current.length - 1
   }, [])
 
+  // Derive current pixels
+  const pixels = frames[currentFrame] ?? createEmptyGrid(width, height)
+  const ghostPixels = ghostEnabled && currentFrame > 0 ? frames[currentFrame - 1] : null
+
   const handlePixelsChange = useCallback(
     (next: boolean[][]) => {
-      setPixels(next)
-      if (!batchingRef.current) {
-        pushHistory(next)
-      }
+      setFrames((prev) => {
+        const updated = [...prev]
+        updated[currentFrame] = next
+        if (!batchingRef.current) {
+          pushHistory(updated, currentFrame)
+        }
+        return updated
+      })
     },
-    [pushHistory]
+    [currentFrame, pushHistory]
   )
 
   const handleDrawStart = useCallback(() => {
@@ -153,16 +223,23 @@ export function PixelEditor() {
   const handleDrawEnd = useCallback(
     (finalPixels: boolean[][]) => {
       batchingRef.current = false
-      pushHistory(finalPixels)
+      setFrames((prev) => {
+        const updated = [...prev]
+        updated[currentFrame] = finalPixels
+        pushHistory(updated, currentFrame)
+        return updated
+      })
     },
-    [pushHistory]
+    [currentFrame, pushHistory]
   )
 
   const undo = useCallback(() => {
     const idx = historyIndexRef.current
     if (idx > 0) {
       historyIndexRef.current = idx - 1
-      setPixels(historyRef.current[idx - 1])
+      const snapshot = historyRef.current[idx - 1]
+      setFrames(cloneFrames(snapshot.frames))
+      setCurrentFrame(snapshot.currentFrame)
     }
   }, [])
 
@@ -170,31 +247,21 @@ export function PixelEditor() {
     const idx = historyIndexRef.current
     if (idx < historyRef.current.length - 1) {
       historyIndexRef.current = idx + 1
-      setPixels(historyRef.current[idx + 1])
+      const snapshot = historyRef.current[idx + 1]
+      setFrames(cloneFrames(snapshot.frames))
+      setCurrentFrame(snapshot.currentFrame)
     }
   }, [])
 
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // z = undo, y = redo (no modifier required per spec)
-      if (
-        e.key === "z" &&
-        !e.shiftKey &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !(e.target instanceof HTMLInputElement)
-      ) {
+      if (e.target instanceof HTMLInputElement) return
+      if (e.key === "z" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault()
         undo()
       }
-      if (
-        e.key === "y" &&
-        !e.shiftKey &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !(e.target instanceof HTMLInputElement)
-      ) {
+      if (e.key === "y" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault()
         redo()
       }
@@ -211,21 +278,72 @@ export function PixelEditor() {
     setInputWidth(String(w))
     setInputHeight(String(h))
 
-    const newGrid = createEmptyGrid(w, h)
-    for (let y = 0; y < Math.min(h, pixels.length); y++) {
-      for (let x = 0; x < Math.min(w, pixels[y]?.length ?? 0); x++) {
-        newGrid[y][x] = pixels[y][x]
-      }
-    }
-    setPixels(newGrid)
-    pushHistory(newGrid)
-  }, [inputWidth, inputHeight, pixels, pushHistory])
+    setFrames((prev) => {
+      const newFrames = prev.map((frame) => {
+        const newGrid = createEmptyGrid(w, h)
+        for (let y = 0; y < Math.min(h, frame.length); y++) {
+          for (let x = 0; x < Math.min(w, frame[y]?.length ?? 0); x++) {
+            newGrid[y][x] = frame[y][x]
+          }
+        }
+        return newGrid
+      })
+      pushHistory(newFrames, currentFrame)
+      return newFrames
+    })
+  }, [inputWidth, inputHeight, pushHistory, currentFrame])
 
   const handleClear = useCallback(() => {
-    const grid = createEmptyGrid(width, height)
-    setPixels(grid)
-    pushHistory(grid)
-  }, [width, height, pushHistory])
+    setFrames((prev) => {
+      const updated = [...prev]
+      updated[currentFrame] = createEmptyGrid(width, height)
+      pushHistory(updated, currentFrame)
+      return updated
+    })
+  }, [width, height, currentFrame, pushHistory])
+
+  // Frame operations
+  const handleAddFrame = useCallback(() => {
+    setFrames((prev) => {
+      const newFrames = [...prev]
+      newFrames.splice(currentFrame + 1, 0, createEmptyGrid(width, height))
+      const newCurrent = currentFrame + 1
+      setCurrentFrame(newCurrent)
+      pushHistory(newFrames, newCurrent)
+      return newFrames
+    })
+  }, [currentFrame, width, height, pushHistory])
+
+  const handleDuplicateFrame = useCallback(() => {
+    setFrames((prev) => {
+      const newFrames = [...prev]
+      const copy = prev[currentFrame].map((row) => [...row])
+      newFrames.splice(currentFrame + 1, 0, copy)
+      const newCurrent = currentFrame + 1
+      setCurrentFrame(newCurrent)
+      pushHistory(newFrames, newCurrent)
+      return newFrames
+    })
+  }, [currentFrame, pushHistory])
+
+  const handleDeleteFrame = useCallback(() => {
+    if (frames.length <= 1) return
+    setFrames((prev) => {
+      const newFrames = prev.filter((_, i) => i !== currentFrame)
+      const newCurrent = Math.min(currentFrame, newFrames.length - 1)
+      setCurrentFrame(newCurrent)
+      pushHistory(newFrames, newCurrent)
+      return newFrames
+    })
+  }, [currentFrame, frames.length, pushHistory])
+
+  const handleSelectFrame = useCallback((index: number) => {
+    setCurrentFrame(index)
+  }, [])
+
+  const handleToggleGhost = useCallback(() => {
+    setGhostEnabled((prev) => !prev)
+  }, [])
 
   const handleExport = useCallback(() => {
     const canvas = document.createElement("canvas")
@@ -251,14 +369,15 @@ export function PixelEditor() {
   }, [width, height, pixels])
 
   const handleExportCSS = useCallback(() => {
-    const css = generateCssGradient(width, height, pixels)
+    const css =
+      frames.length === 1
+        ? generateSingleFrameCSS(width, height, frames[0])
+        : generateAnimatedCSS(width, height, frames)
     navigator.clipboard.writeText(css).then(() => {
       setCopiedCSS(true)
       setTimeout(() => setCopiedCSS(false), 2000)
     })
-  }, [width, height, pixels])
-
-  const [copiedCSS, setCopiedCSS] = useState(false)
+  }, [width, height, frames])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -315,7 +434,7 @@ export function PixelEditor() {
         </div>
       </header>
 
-      <div className="flex flex-1 flex-col lg:flex-row">
+      <div className="flex flex-1 flex-col lg:flex-row overflow-hidden">
         {/* Sidebar */}
         <aside className="flex flex-row lg:flex-col items-start gap-6 border-b lg:border-b-0 lg:border-r border-border p-5 lg:w-60 flex-shrink-0">
           {/* Canvas Size */}
@@ -384,7 +503,7 @@ export function PixelEditor() {
               className="flex items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Clear
+              Clear Frame
             </button>
             <button
               onClick={handleExport}
@@ -398,7 +517,7 @@ export function PixelEditor() {
               className="flex items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
             >
               <Code className="h-3.5 w-3.5" />
-              {copiedCSS ? "Copied!" : "Copy CSS"}
+              {copiedCSS ? "Copied!" : frames.length > 1 ? "Copy Animated CSS" : "Copy CSS"}
             </button>
           </div>
         </aside>
@@ -410,6 +529,7 @@ export function PixelEditor() {
               width={width}
               height={height}
               pixels={pixels}
+              ghostPixels={ghostPixels}
               onPixelsChange={handlePixelsChange}
               onDrawStart={handleDrawStart}
               onDrawEnd={handleDrawEnd}
@@ -418,6 +538,20 @@ export function PixelEditor() {
           </div>
         </main>
       </div>
+
+      {/* Timeline */}
+      <FrameTimeline
+        frames={frames}
+        currentFrame={currentFrame}
+        width={width}
+        height={height}
+        ghostEnabled={ghostEnabled}
+        onSelectFrame={handleSelectFrame}
+        onAddFrame={handleAddFrame}
+        onDuplicateFrame={handleDuplicateFrame}
+        onDeleteFrame={handleDeleteFrame}
+        onToggleGhost={handleToggleGhost}
+      />
     </div>
   )
 }

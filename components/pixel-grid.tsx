@@ -6,6 +6,7 @@ interface PixelGridProps {
   width: number
   height: number
   pixels: boolean[][]
+  ghostPixels?: boolean[][] | null
   onPixelsChange: (pixels: boolean[][]) => void
   onDrawStart?: () => void
   onDrawEnd?: (pixels: boolean[][]) => void
@@ -48,6 +49,7 @@ export function PixelGrid({
   width,
   height,
   pixels,
+  ghostPixels,
   onPixelsChange,
   onDrawStart,
   onDrawEnd,
@@ -67,6 +69,7 @@ export function PixelGrid({
 
   const gridLineColor = "rgba(255, 255, 255, 0.06)"
   const filledColor = "#e8e8e8"
+  const ghostColor = "rgba(120, 160, 255, 0.15)"
   const previewColor = "rgba(232, 232, 232, 0.35)"
   const erasePreviewColor = "rgba(232, 80, 80, 0.35)"
 
@@ -90,6 +93,18 @@ export function PixelGrid({
       // Background
       ctx.fillStyle = "#1a1a1a"
       ctx.fillRect(0, 0, canvasW, canvasH)
+
+      // Ghost pixels (previous frame overlay)
+      if (ghostPixels) {
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            if (ghostPixels[y]?.[x]) {
+              ctx.fillStyle = ghostColor
+              ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize)
+            }
+          }
+        }
+      }
 
       // Filled pixels
       for (let y = 0; y < height; y++) {
@@ -138,7 +153,7 @@ export function PixelGrid({
         ctx.stroke()
       }
     },
-    [width, height, pixels, cellSize]
+    [width, height, pixels, ghostPixels, cellSize]
   )
 
   useEffect(() => {
