@@ -4,10 +4,102 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import { PixelGrid } from "./pixel-grid"
 import { PixelPreview } from "./pixel-preview"
 import { FrameTimeline } from "./frame-timeline"
-import { Grid3x3, Trash2, Download, Undo2, Redo2, Code } from "lucide-react"
+import { Grid3x3, Trash2, Download, Undo2, Redo2, Code, Save, FolderOpen, Share2, X, Check } from "lucide-react"
 
 const STORAGE_KEY = "pixel-editor-settings"
+const SAVES_KEY = "pixel-editor-saves"
 const MAX_HISTORY = 100
+
+interface SavedAnimation {
+  name: string
+  width: number
+  height: number
+  frames: boolean[][][]
+  fps: number
+  savedAt: number
+}
+
+function loadSavedAnimations(): SavedAnimation[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = localStorage.getItem(SAVES_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return []
+}
+
+function persistSavedAnimations(saves: SavedAnimation[]) {
+  try {
+    localStorage.setItem(SAVES_KEY, JSON.stringify(saves))
+  } catch {}
+}
+
+function encodeAnimationToHash(anim: { width: number; height: number; frames: boolean[][][]; fps: number }): string {
+  // Pack frames as bitstring, then base64
+  const { width, height, frames, fps } = anim
+  const header = `${width},${height},${fps},${frames.length}`
+  const bits: number[] = []
+  for (const frame of frames) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        bits.push(frame[y]?.[x] ? 1 : 0)
+      }
+    }
+  }
+  // Pack bits into bytes
+  const bytes: number[] = []
+  for (let i = 0; i < bits.length; i += 8) {
+    let byte = 0
+    for (let j = 0; j < 8 && i + j < bits.length; j++) {
+      byte |= bits[i + j] << (7 - j)
+    }
+    bytes.push(byte)
+  }
+  const binaryStr = String.fromCharCode(...bytes)
+  const b64 = btoa(binaryStr)
+  return `${header}|${b64}`
+}
+
+function decodeAnimationFromHash(hash: string): { width: number; height: number; frames: boolean[][][]; fps: number } | null {
+  try {
+    const [header, b64] = hash.split("|")
+    if (!header || !b64) return null
+    const [w, h, f, n] = header.split(",").map(Number)
+    if (!w || !h || !f || !n) return null
+    const width = Math.min(64, Math.max(1, w))
+    const height = Math.min(64, Math.max(1, h))
+    const fps = Math.min(24, Math.max(1, f))
+    const numFrames = Math.min(64, Math.max(1, n))
+
+    const binaryStr = atob(b64)
+    const bytes = Array.from(binaryStr, (ch) => ch.charCodeAt(0))
+    const bits: number[] = []
+    for (const byte of bytes) {
+      for (let j = 7; j >= 0; j--) {
+        bits.push((byte >> j) & 1)
+      }
+    }
+
+    const frames: boolean[][][] = []
+    let idx = 0
+    for (let fi = 0; fi < numFrames; fi++) {
+      const frame: boolean[][] = []
+      for (let y = 0; y < height; y++) {
+        const row: boolean[] = []
+        for (let x = 0; x < width; x++) {
+          row.push(bits[idx] === 1)
+          idx++
+        }
+        frame.push(row)
+      }
+      frames.push(frame)
+    }
+
+    return { width, height, frames, fps }
+  } catch {
+    return null
+  }
+}
 
 function createEmptyGrid(w: number, h: number): boolean[][] {
   return Array.from({ length: h }, () => Array(w).fill(false))
@@ -190,19 +282,46 @@ export function PixelEditor() {
   const [fps, setFps] = useState(5)
   const [copiedCSS, setCopiedCSS] = useState(false)
 
-  // Initialize from localStorage after mount
+  // Save/Load state
+  const [savedAnimations, setSavedAnimations] = useState<SavedAnimation[]>([])
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [showLoadDialog, setShowLoadDialog] = useState(false)
+  const [saveName, setSaveName] = useState("")
+  const [copiedShare, setCopiedShare] = useState(false)
+
+  // Initialize from localStorage after mount (and check for shared animation in URL)
   useEffect(() => {
     const s = loadSettings()
-    setWidth(s.width)
-    setHeight(s.height)
-    setInputWidth(String(s.width))
-    setInputHeight(String(s.height))
+    let initialWidth = s.width
+    let initialHeight = s.height
+    let initialFrames = [createEmptyGrid(s.width, s.height)]
+    let initialFps = 5
+
+    // Check URL hash for shared animation
+    const hash = window.location.hash.slice(1)
+    if (hash) {
+      const decoded = decodeAnimationFromHash(decodeURIComponent(hash))
+      if (decoded) {
+        initialWidth = decoded.width
+        initialHeight = decoded.height
+        initialFrames = decoded.frames
+        initialFps = decoded.fps
+        // Clear hash after loading
+        window.history.replaceState(null, "", window.location.pathname)
+      }
+    }
+
+    setWidth(initialWidth)
+    setHeight(initialHeight)
+    setInputWidth(String(initialWidth))
+    setInputHeight(String(initialHeight))
     setCellSize(s.cellSize)
-    const initialFrames = [createEmptyGrid(s.width, s.height)]
     setFrames(initialFrames)
+    setFps(initialFps)
     setCurrentFrame(0)
     historyRef.current = [{ frames: initialFrames, currentFrame: 0 }]
     historyIndexRef.current = 0
+    setSavedAnimations(loadSavedAnimations())
     setMounted(true)
   }, [])
 
@@ -405,6 +524,61 @@ export function PixelEditor() {
     })
   }, [width, height, frames, fps])
 
+  const handleSaveAnimation = useCallback(
+    (name: string) => {
+      if (!name.trim()) return
+      const save: SavedAnimation = {
+        name: name.trim(),
+        width,
+        height,
+        frames: cloneFrames(frames),
+        fps,
+        savedAt: Date.now(),
+      }
+      setSavedAnimations((prev) => {
+        // Replace if same name exists
+        const filtered = prev.filter((s) => s.name !== save.name)
+        const updated = [save, ...filtered]
+        persistSavedAnimations(updated)
+        return updated
+      })
+      setShowSaveDialog(false)
+      setSaveName("")
+    },
+    [width, height, frames, fps]
+  )
+
+  const handleLoadAnimation = useCallback((save: SavedAnimation) => {
+    setWidth(save.width)
+    setHeight(save.height)
+    setInputWidth(String(save.width))
+    setInputHeight(String(save.height))
+    setFrames(cloneFrames(save.frames))
+    setFps(save.fps)
+    setCurrentFrame(0)
+    const newFrames = cloneFrames(save.frames)
+    historyRef.current = [{ frames: newFrames, currentFrame: 0 }]
+    historyIndexRef.current = 0
+    setShowLoadDialog(false)
+  }, [])
+
+  const handleDeleteSave = useCallback((name: string) => {
+    setSavedAnimations((prev) => {
+      const updated = prev.filter((s) => s.name !== name)
+      persistSavedAnimations(updated)
+      return updated
+    })
+  }, [])
+
+  const handleShareAnimation = useCallback(() => {
+    const hash = encodeAnimationToHash({ width, height, frames, fps })
+    const url = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(hash)}`
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedShare(true)
+      setTimeout(() => setCopiedShare(false), 2000)
+    })
+  }, [width, height, frames, fps])
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter") handleApplySize()
@@ -540,27 +714,54 @@ export function PixelEditor() {
           </div>
 
           {/* Actions */}
-          <div className="flex flex-col gap-2 lg:mt-auto">
+          <div className="flex flex-col gap-2 lg:mt-auto w-full">
             <button
               onClick={handleClear}
-              className="flex items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />
               Clear Frame
             </button>
             <button
               onClick={handleExport}
-              className="flex items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
             >
-              <Download className="h-3.5 w-3.5" />
+              <Download className="h-3.5 w-3.5 flex-shrink-0" />
               Export PNG
             </button>
             <button
               onClick={handleExportCSS}
-              className="flex items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
             >
-              <Code className="h-3.5 w-3.5" />
-              {copiedCSS ? "Copied!" : frames.length > 1 ? "Copy Animated CSS" : "Copy CSS"}
+              <Code className="h-3.5 w-3.5 flex-shrink-0" />
+              <span>{copiedCSS ? "Copied!" : frames.length > 1 ? "Copy Animated CSS" : "Copy CSS"}</span>
+            </button>
+
+            <div className="my-1 h-px w-full bg-border" />
+
+            <button
+              onClick={() => {
+                setSaveName("")
+                setShowSaveDialog(true)
+              }}
+              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <Save className="h-3.5 w-3.5 flex-shrink-0" />
+              Save Animation
+            </button>
+            <button
+              onClick={() => setShowLoadDialog(true)}
+              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
+              Load Animation
+            </button>
+            <button
+              onClick={handleShareAnimation}
+              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <Share2 className="h-3.5 w-3.5 flex-shrink-0" />
+              <span>{copiedShare ? "Link Copied!" : "Share Link"}</span>
             </button>
           </div>
         </aside>
@@ -595,6 +796,108 @@ export function PixelEditor() {
         onDeleteFrame={handleDeleteFrame}
         onToggleGhost={handleToggleGhost}
       />
+
+      {/* Save Dialog */}
+      {showSaveDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="flex w-80 flex-col gap-4 rounded-lg border border-border bg-card p-5 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold font-mono">Save Animation</h2>
+              <button
+                onClick={() => setShowSaveDialog(false)}
+                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSaveAnimation(saveName)
+                if (e.key === "Escape") setShowSaveDialog(false)
+              }}
+              placeholder="Animation name..."
+              autoFocus
+              className="h-9 rounded border border-border bg-secondary px-3 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground"
+            />
+            {savedAnimations.some((s) => s.name === saveName.trim()) && (
+              <p className="text-[11px] text-muted-foreground">
+                A save with this name already exists and will be overwritten.
+              </p>
+            )}
+            <button
+              onClick={() => handleSaveAnimation(saveName)}
+              disabled={!saveName.trim()}
+              className="flex items-center justify-center gap-2 rounded border border-border bg-foreground px-3 py-2 text-xs font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <Check className="h-3.5 w-3.5" />
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Load Dialog */}
+      {showLoadDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="flex w-96 max-h-[70vh] flex-col gap-4 rounded-lg border border-border bg-card p-5 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold font-mono">Load Animation</h2>
+              <button
+                onClick={() => setShowLoadDialog(false)}
+                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {savedAnimations.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No saved animations yet.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-1 overflow-y-auto">
+                {savedAnimations.map((save) => (
+                  <div
+                    key={save.name}
+                    className="group flex items-center gap-3 rounded border border-border bg-secondary p-3 transition-colors hover:bg-accent"
+                  >
+                    <PixelPreview
+                      width={save.width}
+                      height={save.height}
+                      frames={save.frames}
+                      fps={save.fps}
+                    />
+                    <div className="flex flex-1 flex-col gap-0.5 min-w-0">
+                      <span className="text-xs font-medium text-foreground truncate">
+                        {save.name}
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {save.width}x{save.height} &middot; {save.frames.length} frame{save.frames.length !== 1 ? "s" : ""} &middot; {save.fps} fps
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleLoadAnimation(save)}
+                        className="rounded border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-foreground hover:text-background"
+                      >
+                        Load
+                      </button>
+                      <button
+                        onClick={() => handleDeleteSave(save.name)}
+                        className="flex items-center justify-center rounded border border-border bg-card p-1 text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
