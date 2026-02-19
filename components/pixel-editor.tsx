@@ -86,63 +86,87 @@ function generateCssGradientForFrame(
 function generateSingleFrameCSS(width: number, height: number, pixels: boolean[][]): string {
   const { bgImages, bgPositions, bgSizes } = generateCssGradientForFrame(width, height, pixels)
 
-  if (bgImages.length === 0) return "/* Empty canvas -- no filled pixels */"
+  if (bgImages.length === 0) return ".pixelated {\n  /* Empty canvas -- no filled pixels */\n}"
 
-  return [
-    `--pixel-color: currentColor;`,
-    `width: ${width}px;`,
-    `height: ${height}px;`,
-    `background-image:`,
-    `  ${bgImages.join(",\n  ")};`,
-    `background-position:`,
-    `  ${bgPositions.join(",\n  ")};`,
-    `background-size:`,
-    `  ${bgSizes.join(",\n  ")};`,
-    `background-repeat: no-repeat;`,
-  ].join("\n")
+  const lines = [
+    `.pixelated {`,
+    `  --pixel-color: currentColor;`,
+    `  width: ${width}px;`,
+    `  height: ${height}px;`,
+    `  background-image:`,
+    `    ${bgImages.join(",\n    ")};`,
+    `  background-position:`,
+    `    ${bgPositions.join(",\n    ")};`,
+    `  background-size:`,
+    `    ${bgSizes.join(",\n    ")};`,
+    `  background-repeat: no-repeat;`,
+    `}`,
+  ]
+  return lines.join("\n")
 }
 
 function generateAnimatedCSS(width: number, height: number, frames: boolean[][][], fps: number = 5): string {
+  // Spritesheet approach: lay all frames out side by side in a wide canvas,
+  // then animate background-position to shift one frame-width at a time.
   const n = frames.length
   const frameDuration = Math.round(1000 / fps)
+  const totalWidth = width * n
 
-  const keyframeBlocks: string[] = []
+  // Collect all gradients across frames, offset each frame by (i * width)px horizontally
+  const allBgImages: string[] = []
+  const allBgPositions: string[] = []
+  const allBgSizes: string[] = []
+
   for (let i = 0; i < n; i++) {
-    const pct = ((i / n) * 100).toFixed(4)
+    const offsetX = i * width
     const { bgImages, bgPositions, bgSizes } = generateCssGradientForFrame(width, height, frames[i])
 
-    if (bgImages.length === 0) {
-      keyframeBlocks.push(
-        `  ${pct}% {\n    background-image: none;\n  }`
-      )
-    } else {
-      keyframeBlocks.push(
-        [
-          `  ${pct}% {`,
-          `    background-image:`,
-          `      ${bgImages.join(",\n      ")};`,
-          `    background-position:`,
-          `      ${bgPositions.join(",\n      ")};`,
-          `    background-size:`,
-          `      ${bgSizes.join(",\n      ")};`,
-          `  }`,
-        ].join("\n")
-      )
+    for (let j = 0; j < bgImages.length; j++) {
+      allBgImages.push(bgImages[j])
+      // Parse original position "0 Ypx" and add frame offset to x
+      const origPos = bgPositions[j] // "0 Ypx"
+      const parts = origPos.split(" ")
+      const xVal = parseInt(parts[0]) + offsetX
+      allBgPositions.push(`${xVal}px ${parts[1]}`)
+      allBgSizes.push(bgSizes[j])
     }
   }
 
-  return [
-    `--pixel-color: currentColor;`,
-    `--animation-speed: ${frameDuration}ms;`,
-    `width: ${width}px;`,
-    `height: ${height}px;`,
-    `background-repeat: no-repeat;`,
-    `animation: pixel-animation calc(var(--animation-speed) * ${n}) steps(${n}) infinite;`,
+  if (allBgImages.length === 0) return ".pixelated {\n  /* Empty canvas -- no filled pixels */\n}"
+
+  const lines = [
+    `.pixelated {`,
+    `  --pixel-color: currentColor;`,
+    `  --animation-speed: ${frameDuration}ms;`,
+    `  width: ${width}px;`,
+    `  height: ${height}px;`,
+    `  overflow: hidden;`,
+    `  background-image:`,
+    `    ${allBgImages.join(",\n    ")};`,
+    `  background-position:`,
+    `    ${allBgPositions.join(",\n    ")};`,
+    `  background-size:`,
+    `    ${allBgSizes.join(",\n    ")};`,
+    `  background-repeat: no-repeat;`,
+    `  animation: pixel-animation calc(var(--animation-speed) * ${n}) steps(${n}) infinite;`,
+    `}`,
     ``,
     `@keyframes pixel-animation {`,
-    ...keyframeBlocks,
+    `  from {`,
+    `    background-position:`,
+    `      ${allBgPositions.join(",\n      ")};`,
+    `  }`,
+    `  to {`,
+    `    background-position:`,
+    `      ${allBgPositions.map((pos) => {
+          const parts = pos.split(" ")
+          const xVal = parseInt(parts[0]) - totalWidth
+          return `${xVal}px ${parts[1]}`
+        }).join(",\n      ")};`,
+    `  }`,
     `}`,
-  ].join("\n")
+  ]
+  return lines.join("\n")
 }
 
 export function PixelEditor() {
