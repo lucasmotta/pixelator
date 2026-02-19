@@ -192,7 +192,7 @@ export function PixelGrid({
 
       onDrawStart?.()
 
-      const erasing = e.altKey
+      const erasing = pixelsRef.current[cell[1]]?.[cell[0]] ?? false
       isErasing.current = erasing
 
       if (e.shiftKey) {

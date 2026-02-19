@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import { PixelGrid } from "./pixel-grid"
 import { PixelPreview } from "./pixel-preview"
 import { FrameTimeline } from "./frame-timeline"
-import { Trash2, Download, Undo2, Redo2, Code, FileCode, Save, FolderOpen, Share2, X, Check } from "lucide-react"
+import { Undo2, Redo2, Save, FolderOpen, Share2, X, Check, Trash2 } from "lucide-react"
 
 const STORAGE_KEY = "pixel-editor-settings"
 const SAVES_KEY = "pixel-editor-saves"
@@ -495,16 +495,7 @@ export function PixelEditor() {
     })
   }, [inputWidth, inputHeight, pushHistory, currentFrame])
 
-  const handleClear = useCallback(() => {
-    setFrames((prev) => {
-      const updated = [...prev]
-      updated[currentFrame] = createEmptyGrid(width, height)
-      pushHistory(updated, currentFrame)
-      return updated
-    })
-  }, [width, height, currentFrame, pushHistory])
-
-  // Frame operations
+// Frame operations
   const handleAddFrame = useCallback(() => {
     setFrames((prev) => {
       const newFrames = [...prev]
@@ -547,30 +538,7 @@ export function PixelEditor() {
     setGhostEnabled((prev) => !prev)
   }, [])
 
-  const handleExport = useCallback(() => {
-    const canvas = document.createElement("canvas")
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-
-    ctx.clearRect(0, 0, width, height)
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (pixels[y]?.[x]) {
-          ctx.fillStyle = "#000000"
-          ctx.fillRect(x, y, 1, 1)
-        }
-      }
-    }
-
-    const link = document.createElement("a")
-    link.download = `pixel-art-${width}x${height}.png`
-    link.href = canvas.toDataURL("image/png")
-    link.click()
-  }, [width, height, pixels])
-
-  const handleExportCSS = useCallback(() => {
+const handleExportCSS = useCallback(() => {
     const css =
       frames.length === 1
         ? generateSingleFrameCSS(width, height, frames[0])
@@ -660,7 +628,7 @@ export function PixelEditor() {
     <div className="flex min-h-screen flex-col bg-background text-foreground">
 <div className="flex flex-1 flex-col lg:flex-row overflow-hidden">
         {/* Sidebar */}
-        <aside className="flex flex-row lg:flex-col items-start gap-6 border-b lg:border-b-0 lg:border-r border-border p-5 lg:w-60 flex-shrink-0">
+        <aside className="flex flex-row lg:flex-col items-start gap-6 border-b lg:border-b-0 lg:border-r border-border p-5 lg:w-[250px] flex-shrink-0">
           {/* Preview */}
           <div className="flex w-full flex-col gap-3">
             <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
@@ -720,61 +688,49 @@ export function PixelEditor() {
 
           {/* Actions */}
           <div className="flex flex-col gap-2 lg:mt-auto w-full">
-            <button
-              onClick={handleClear}
-              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-            >
-              <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />
-              Clear Frame
-            </button>
-            <button
-              onClick={handleExport}
-              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-            >
-              <Download className="h-3.5 w-3.5 flex-shrink-0" />
-              Export PNG
-            </button>
-            <button
+<button
               onClick={handleExportCSS}
               className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
             >
-              <Code className="h-3.5 w-3.5 flex-shrink-0" />
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 256 256" className="flex-shrink-0"><path d="M48,180c0,11,7.18,20,16,20a14.24,14.24,0,0,0,10.22-4.66A8,8,0,1,1,85.77,206.4,30,30,0,0,1,64,216c-17.65,0-32-16.15-32-36s14.35-36,32-36a30,30,0,0,1,21.77,9.6,8,8,0,1,1-11.55,11.06A14.24,14.24,0,0,0,64,160C55.18,160,48,169,48,180Zm79.6-8.69c-4-1.16-8.14-2.35-10.45-3.84-1.26-.81-1.23-1-1.12-1.9a4.54,4.54,0,0,1,2-3.67c4.6-3.12,15.34-1.73,19.83-.56a8,8,0,0,0,4.07-15.48c-2.12-.55-21-5.22-32.83,2.76a20.55,20.55,0,0,0-9,14.95c-2,15.88,13.64,20.41,23,23.11,12.07,3.49,13.13,4.92,12.78,7.59-.31,2.41-1.26,3.34-2.14,3.93-4.6,3.06-15.17,1.56-19.55.36a8,8,0,0,0-4.3,15.41,61.23,61.23,0,0,0,15.18,2c5.83,0,12.3-1,17.49-4.46a20.82,20.82,0,0,0,9.19-15.23C154,179,137.48,174.17,127.6,171.31Zm64,0c-4-1.16-8.14-2.35-10.45-3.84-1.25-.81-1.23-1-1.12-1.9a4.54,4.54,0,0,1,2-3.67c4.6-3.12,15.34-1.73,19.82-.56a8,8,0,0,0,4.07-15.48c-2.11-.55-21-5.22-32.83,2.76a20.58,20.58,0,0,0-8.95,14.95c-2,15.88,13.65,20.41,23,23.11,12.06,3.49,13.12,4.92,12.78,7.59-.31,2.41-1.26,3.34-2.15,3.93-4.6,3.06-15.16,1.56-19.54.36A8,8,0,0,0,173.93,214a61.34,61.34,0,0,0,15.19,2c5.82,0,12.3-1,17.49-4.46a20.81,20.81,0,0,0,9.18-15.23C218,179,201.48,174.17,191.59,171.31ZM40,112V40A16,16,0,0,1,56,24h96a8,8,0,0,1,5.66,2.34l56,56A8,8,0,0,1,216,88v24a8,8,0,1,1-16,0V96H152a8,8,0,0,1-8-8V40H56v72a8,8,0,0,1-16,0ZM160,80h28.68L160,51.31Z"/></svg>
               <span>{copiedCSS ? "Copied!" : frames.length > 1 ? "Copy Animated CSS" : "Copy CSS"}</span>
             </button>
             <button
               onClick={handleExportSVG}
               className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
             >
-              <FileCode className="h-3.5 w-3.5 flex-shrink-0" />
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 256 256" className="flex-shrink-0"><path d="M87.82,196.31a20.82,20.82,0,0,1-9.19,15.23C73.44,215,67,216,61.14,216A61.23,61.23,0,0,1,46,214a8,8,0,0,1,4.3-15.41c4.38,1.2,14.95,2.7,19.55-.36.88-.59,1.83-1.52,2.14-3.93.35-2.67-.71-4.1-12.78-7.59-9.35-2.7-25-7.23-23-23.11a20.55,20.55,0,0,1,9-14.95c11.84-8,30.72-3.31,32.83-2.76a8,8,0,0,1-4.07,15.48c-4.48-1.17-15.23-2.56-19.83.56a4.54,4.54,0,0,0-2,3.67c-.11.9-.14,1.09,1.12,1.9,2.31,1.49,6.44,2.68,10.45,3.84C73.5,174.17,90.06,179,87.82,196.31ZM216,88v24a8,8,0,0,1-16,0V96H152a8,8,0,0,1-8-8V40H56v72a8,8,0,1,1-16,0V40A16,16,0,0,1,56,24h96a8,8,0,0,1,5.65,2.34l56,56A8,8,0,0,1,216,88Zm-56-8h28.69L160,51.31Zm-13.3,64.47a8,8,0,0,0-10.23,4.84L124,184.21l-12.47-34.9a8,8,0,1,0-15.06,5.38l20,56a8,8,0,0,0,15.07,0l20-56A8,8,0,0,0,146.7,144.47ZM208,176h-8a8,8,0,0,0,0,16v5.29a13.38,13.38,0,0,1-8,2.71c-8.82,0-16-9-16-20s7.18-20,16-20a13.27,13.27,0,0,1,7.53,2.38,8,8,0,0,0,8.95-13.26A29.38,29.38,0,0,0,192,144c-17.64,0-32,16.15-32,36s14.36,36,32,36a30.06,30.06,0,0,0,21.78-9.6,8,8,0,0,0,2.22-5.53V184A8,8,0,0,0,208,176Z"/></svg>
               <span>{copiedSVG ? "Copied!" : frames.length > 1 ? "Copy Animated SVG" : "Copy SVG"}</span>
             </button>
 
             <div className="my-1 h-px w-full bg-border" />
 
-            <button
-              onClick={() => {
-                setSaveName("")
-                setShowSaveDialog(true)
-              }}
-              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-            >
-              <Save className="h-3.5 w-3.5 flex-shrink-0" />
-              Save Animation
-            </button>
-            <button
-              onClick={() => setShowLoadDialog(true)}
-              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-            >
-              <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
-              Load Animation
-            </button>
-            <button
-              onClick={handleShareAnimation}
-              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-            >
-              <Share2 className="h-3.5 w-3.5 flex-shrink-0" />
-              <span>{copiedShare ? "Link Copied!" : "Share Link"}</span>
-            </button>
+            <div className="flex w-full items-center gap-1">
+              <button
+                onClick={() => { setSaveName(""); setShowSaveDialog(true) }}
+                aria-label="Save animation"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded border border-border bg-secondary px-2 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                <Save className="h-3.5 w-3.5" />
+                Save
+              </button>
+              <button
+                onClick={() => setShowLoadDialog(true)}
+                aria-label="Load animation"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded border border-border bg-secondary px-2 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                Load
+              </button>
+              <button
+                onClick={handleShareAnimation}
+                aria-label="Share link"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded border border-border bg-secondary px-2 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                {copiedShare ? <Check className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}
+                {copiedShare ? "Copied!" : "Share"}
+              </button>
+            </div>
           </div>
         </aside>
 
@@ -813,9 +769,6 @@ export function PixelEditor() {
           </div>
           {/* Keyboard hints */}
           <div className="absolute bottom-4 left-4 hidden sm:flex items-center gap-1.5">
-            <kbd className="inline-flex items-center rounded border border-border bg-card/80 px-1.5 py-1 text-[10px] font-mono text-muted-foreground backdrop-blur-sm">
-              Opt: erase
-            </kbd>
             <kbd className="inline-flex items-center rounded border border-border bg-card/80 px-1.5 py-1 text-[10px] font-mono text-muted-foreground backdrop-blur-sm">
               Shift: line
             </kbd>
