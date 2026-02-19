@@ -54,7 +54,7 @@ export function PixelPreview({
   return (
     <canvas
       ref={canvasRef}
-      className="border border-border"
+      className="outline outline-1 outline-border"
       style={{
         width,
         height,
