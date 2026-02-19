@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import { PixelGrid } from "./pixel-grid"
 import { PixelPreview } from "./pixel-preview"
 import { FrameTimeline } from "./frame-timeline"
-import { Grid3x3, Trash2, Download, Undo2, Redo2, Code, Save, FolderOpen, Share2, X, Check } from "lucide-react"
+import { Grid3x3, Trash2, Download, Undo2, Redo2, Code, FileCode, Save, FolderOpen, Share2, X, Check } from "lucide-react"
 
 const STORAGE_KEY = "pixel-editor-settings"
 const SAVES_KEY = "pixel-editor-saves"
@@ -261,6 +261,62 @@ function generateAnimatedCSS(width: number, height: number, frames: boolean[][][
   return lines.join("\n")
 }
 
+function generateSVG(width: number, height: number, frames: boolean[][][], fps: number): string {
+  const n = frames.length
+  const dur = (n / fps).toFixed(3)
+
+  // Build pattern map: patternString → list of {x, y}
+  const patternMap = new Map<string, Array<{ x: number; y: number }>>()
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const pattern = frames.map(f => (f[y]?.[x] ? '1' : '0')).join('')
+      if (pattern === '0'.repeat(n)) continue // never active
+      if (!patternMap.has(pattern)) patternMap.set(pattern, [])
+      patternMap.get(pattern)!.push({ x, y })
+    }
+  }
+
+  const groups: string[] = []
+  for (const [pattern, pixels] of patternMap) {
+    // Run-length encode per row
+    const byRow = new Map<number, Array<{ startX: number; endX: number }>>()
+    pixels.sort((a, b) => a.y - b.y || a.x - b.x)
+    for (const { x, y } of pixels) {
+      if (!byRow.has(y)) byRow.set(y, [])
+      const row = byRow.get(y)!
+      const last = row[row.length - 1]
+      if (last && last.endX === x) {
+        last.endX = x + 1
+      } else {
+        row.push({ startX: x, endX: x + 1 })
+      }
+    }
+    const rects = Array.from(byRow.entries())
+      .flatMap(([y, runs]) =>
+        runs.map(({ startX, endX }) =>
+          `    <rect x="${startX}" y="${y}" width="${endX - startX}" height="1"/>`
+        )
+      )
+      .join('\n')
+
+    const alwaysOn = pattern === '1'.repeat(n)
+    const initialOpacity = pattern[0] === '1' ? '1' : '0'
+    const animEl = alwaysOn
+      ? ''
+      : `\n    <animate attributeName="opacity" values="${pattern.split('').join(';')}" calcMode="discrete" dur="${dur}s" repeatCount="indefinite"/>`
+
+    groups.push(
+      `  <g fill="currentColor" opacity="${initialOpacity}">\n${rects}${animEl}\n  </g>`
+    )
+  }
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" shape-rendering="crispEdges">`,
+    ...groups,
+    `</svg>`,
+  ].join('\n')
+}
+
 export function PixelEditor() {
   const [mounted, setMounted] = useState(false)
   const [width, setWidth] = useState(16)
@@ -281,6 +337,7 @@ export function PixelEditor() {
 
   const [fps, setFps] = useState(5)
   const [copiedCSS, setCopiedCSS] = useState(false)
+  const [copiedSVG, setCopiedSVG] = useState(false)
 
   // Save/Load state
   const [savedAnimations, setSavedAnimations] = useState<SavedAnimation[]>([])
@@ -297,16 +354,16 @@ export function PixelEditor() {
     let initialFrames = [createEmptyGrid(s.width, s.height)]
     let initialFps = 5
 
-    // Check URL hash for shared animation
-    const hash = window.location.hash.slice(1)
-    if (hash) {
-      const decoded = decodeAnimationFromHash(decodeURIComponent(hash))
+    // Check query param for shared animation
+    const px = new URLSearchParams(window.location.search).get("px")
+    if (px) {
+      const decoded = decodeAnimationFromHash(decodeURIComponent(px))
       if (decoded) {
         initialWidth = decoded.width
         initialHeight = decoded.height
         initialFrames = decoded.frames
         initialFps = decoded.fps
-        // Clear hash after loading
+        // Clear param after loading
         window.history.replaceState(null, "", window.location.pathname)
       }
     }
@@ -524,6 +581,14 @@ export function PixelEditor() {
     })
   }, [width, height, frames, fps])
 
+  const handleExportSVG = useCallback(() => {
+    const svg = generateSVG(width, height, frames, fps)
+    navigator.clipboard.writeText(svg).then(() => {
+      setCopiedSVG(true)
+      setTimeout(() => setCopiedSVG(false), 2000)
+    })
+  }, [width, height, frames, fps])
+
   const handleSaveAnimation = useCallback(
     (name: string) => {
       if (!name.trim()) return
@@ -572,7 +637,7 @@ export function PixelEditor() {
 
   const handleShareAnimation = useCallback(() => {
     const hash = encodeAnimationToHash({ width, height, frames, fps })
-    const url = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(hash)}`
+    const url = `${window.location.origin}${window.location.pathname}?px=${encodeURIComponent(hash)}`
     navigator.clipboard.writeText(url).then(() => {
       setCopiedShare(true)
       setTimeout(() => setCopiedShare(false), 2000)
@@ -620,23 +685,39 @@ export function PixelEditor() {
               <Redo2 className="h-3.5 w-3.5" />
             </button>
           </div>
-          <div className="hidden sm:flex items-center gap-2">
-            <kbd className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-              Opt: erase
-            </kbd>
-            <kbd className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-              Shift: line
-            </kbd>
-            <kbd className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-              Z / Y: undo/redo
-            </kbd>
-          </div>
         </div>
       </header>
 
       <div className="flex flex-1 flex-col lg:flex-row overflow-hidden">
         {/* Sidebar */}
         <aside className="flex flex-row lg:flex-col items-start gap-6 border-b lg:border-b-0 lg:border-r border-border p-5 lg:w-60 flex-shrink-0">
+          {/* Preview */}
+          <div className="flex w-full flex-col gap-3">
+            <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+              Preview ({width}x{height})
+            </label>
+            <div className="flex w-full items-center justify-center rounded-lg border border-border bg-secondary/40" style={{ aspectRatio: "1 / 1" }}>
+              <PixelPreview width={width} height={height} frames={frames} fps={fps} />
+            </div>
+            {frames.length > 1 && (
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] font-mono text-muted-foreground">FPS</label>
+                <input
+                  type="range"
+                  min={1}
+                  max={24}
+                  step={1}
+                  value={fps}
+                  onChange={(e) => setFps(parseInt(e.target.value))}
+                  className="w-20 accent-foreground"
+                />
+                <span className="text-[10px] font-mono text-muted-foreground w-5 text-right">
+                  {fps}
+                </span>
+              </div>
+            )}
+          </div>
+
           {/* Canvas Size */}
           <div className="flex flex-col gap-3">
             <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
@@ -667,52 +748,6 @@ export function PixelEditor() {
             </div>
           </div>
 
-          {/* Zoom */}
-          <div className="flex flex-col gap-3">
-            <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
-              Zoom
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={8}
-                max={48}
-                step={2}
-                value={cellSize}
-                onChange={(e) => setCellSize(parseInt(e.target.value))}
-                className="w-28 accent-foreground"
-              />
-              <span className="text-xs font-mono text-muted-foreground w-8 text-right">
-                {cellSize}px
-              </span>
-            </div>
-          </div>
-
-          {/* Preview */}
-          <div className="flex flex-col gap-3">
-            <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
-              Preview ({width}x{height})
-            </label>
-            <PixelPreview width={width} height={height} frames={frames} fps={fps} />
-            {frames.length > 1 && (
-              <div className="flex items-center gap-2">
-                <label className="text-[10px] font-mono text-muted-foreground">FPS</label>
-                <input
-                  type="range"
-                  min={1}
-                  max={24}
-                  step={1}
-                  value={fps}
-                  onChange={(e) => setFps(parseInt(e.target.value))}
-                  className="w-20 accent-foreground"
-                />
-                <span className="text-[10px] font-mono text-muted-foreground w-5 text-right">
-                  {fps}
-                </span>
-              </div>
-            )}
-          </div>
-
           {/* Actions */}
           <div className="flex flex-col gap-2 lg:mt-auto w-full">
             <button
@@ -735,6 +770,13 @@ export function PixelEditor() {
             >
               <Code className="h-3.5 w-3.5 flex-shrink-0" />
               <span>{copiedCSS ? "Copied!" : frames.length > 1 ? "Copy Animated CSS" : "Copy CSS"}</span>
+            </button>
+            <button
+              onClick={handleExportSVG}
+              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <FileCode className="h-3.5 w-3.5 flex-shrink-0" />
+              <span>{copiedSVG ? "Copied!" : frames.length > 1 ? "Copy Animated SVG" : "Copy SVG"}</span>
             </button>
 
             <div className="my-1 h-px w-full bg-border" />
@@ -767,7 +809,7 @@ export function PixelEditor() {
         </aside>
 
         {/* Canvas Area */}
-        <main className="flex flex-1 items-center justify-center overflow-auto p-8">
+        <main className="relative flex flex-1 items-center justify-center overflow-auto p-8">
           <div className="inline-block border border-border bg-card shadow-lg shadow-black/30">
             <PixelGrid
               width={width}
@@ -778,6 +820,31 @@ export function PixelEditor() {
               onDrawStart={handleDrawStart}
               onDrawEnd={handleDrawEnd}
               cellSize={cellSize}
+            />
+          </div>
+          {/* Keyboard hints */}
+          <div className="absolute bottom-4 left-4 hidden sm:flex items-center gap-1.5">
+            <kbd className="inline-flex items-center rounded border border-border bg-card/80 px-1.5 py-1 text-[10px] font-mono text-muted-foreground backdrop-blur-sm">
+              Opt: erase
+            </kbd>
+            <kbd className="inline-flex items-center rounded border border-border bg-card/80 px-1.5 py-1 text-[10px] font-mono text-muted-foreground backdrop-blur-sm">
+              Shift: line
+            </kbd>
+            <kbd className="inline-flex items-center rounded border border-border bg-card/80 px-1.5 py-1 text-[10px] font-mono text-muted-foreground backdrop-blur-sm">
+              Z / Y: undo/redo
+            </kbd>
+          </div>
+          {/* Zoom */}
+          <div className="absolute bottom-4 right-4 flex items-center gap-2 rounded-lg border border-border bg-card/80 px-3 py-2 backdrop-blur-sm">
+            <label className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Zoom</label>
+            <input
+              type="range"
+              min={8}
+              max={48}
+              step={2}
+              value={cellSize}
+              onChange={(e) => setCellSize(parseInt(e.target.value))}
+              className="w-24 accent-foreground"
             />
           </div>
         </main>
