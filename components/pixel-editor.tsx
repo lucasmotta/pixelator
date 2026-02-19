@@ -56,14 +56,15 @@ function encodeAnimationToHash(anim: { width: number; height: number; frames: bo
     bytes.push(byte)
   }
   const binaryStr = String.fromCharCode(...bytes)
-  const b64 = btoa(binaryStr)
+  const b64 = btoa(binaryStr).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
   return `${header}|${b64}`
 }
 
 function decodeAnimationFromHash(hash: string): { width: number; height: number; frames: boolean[][][]; fps: number } | null {
   try {
-    const [header, b64] = hash.split("|")
-    if (!header || !b64) return null
+    const [header, b64raw] = hash.split("|")
+    if (!header || !b64raw) return null
+    const b64 = b64raw.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - b64raw.length % 4) % 4)
     const [w, h, f, n] = header.split(",").map(Number)
     if (!w || !h || !f || !n) return null
     const width = Math.min(64, Math.max(1, w))
@@ -357,7 +358,7 @@ export function PixelEditor() {
     // Check query param for shared animation
     const px = new URLSearchParams(window.location.search).get("px")
     if (px) {
-      const decoded = decodeAnimationFromHash(decodeURIComponent(px))
+      const decoded = decodeAnimationFromHash(px)
       if (decoded) {
         initialWidth = decoded.width
         initialHeight = decoded.height
@@ -365,6 +366,16 @@ export function PixelEditor() {
         initialFps = decoded.fps
         // Clear param after loading
         window.history.replaceState(null, "", window.location.pathname)
+      }
+    } else {
+      // No shared link — load the most recently saved animation
+      const saves = loadSavedAnimations()
+      if (saves.length > 0) {
+        const last = saves[0]
+        initialWidth = last.width
+        initialHeight = last.height
+        initialFrames = cloneFrames(last.frames)
+        initialFps = last.fps
       }
     }
 
