@@ -265,7 +265,7 @@ export function PixelGrid({
   return (
     <canvas
       ref={canvasRef}
-      className="cursor-crosshair rounded-lg"
+      className="cursor-crosshair"
       style={{
         width: width * cellSize,
         height: height * cellSize,

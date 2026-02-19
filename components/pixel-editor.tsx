@@ -76,9 +76,6 @@ export function PixelEditor() {
     [handleApplySize]
   )
 
-  // Calculate preview scale to make it visible but not oversized
-  const previewScale = Math.max(1, Math.min(6, Math.floor(160 / Math.max(width, height))))
-
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       {/* Header */}
@@ -167,7 +164,6 @@ export function PixelEditor() {
               width={width}
               height={height}
               pixels={pixels}
-              scale={previewScale}
             />
           </div>
 
@@ -192,7 +188,7 @@ export function PixelEditor() {
 
         {/* Canvas Area */}
         <main className="flex flex-1 items-center justify-center overflow-auto p-8">
-          <div className="inline-block rounded-lg border border-border bg-card p-1 shadow-lg shadow-black/30">
+          <div className="inline-block border border-border bg-card shadow-lg shadow-black/30">
             <PixelGrid
               width={width}
               height={height}
