@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import { PixelGrid } from "./pixel-grid"
 import { PixelPreview } from "./pixel-preview"
 import { FrameTimeline } from "./frame-timeline"
-import { Undo2, Redo2, Save, FolderOpen, Share2, X, Check, Trash2, Download, FilePlus } from "lucide-react"
+import { Undo2, Redo2, Save, FolderOpen, Share2, X, Check, Trash2, Download, FilePlus, Ghost } from "lucide-react"
 import { encodeGIF } from "@/lib/gif-encoder"
 
 const STORAGE_KEY = "pixel-editor-settings"
@@ -531,36 +531,23 @@ export function PixelEditor() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if (e.key === "z" && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        undo()
+      const meta = e.metaKey || e.ctrlKey
+
+      // Undo / redo
+      if (e.key === "z" && !e.shiftKey && meta) { e.preventDefault(); undo() }
+      if (e.key === "y" && !e.shiftKey && meta)  { e.preventDefault(); redo() }
+      if (e.key === "z" &&  e.shiftKey && meta)  { e.preventDefault(); redo() }
+
+      // Save / Load dialogs
+      if (e.key === "s" && !e.shiftKey && meta) {
+        e.preventDefault(); setSaveName(""); setShowSaveDialog(true)
       }
-      if (e.key === "y" && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        redo()
+      if (e.key === "o" && meta) {
+        e.preventDefault(); setShowLoadDialog(true)
       }
-      if (e.key === "z" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        redo()
-      }
-      if (e.key === "n" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        const newFrames = [createEmptyGrid(width, height)]
-        setFrames(newFrames)
-        setCurrentFrame(0)
-        historyRef.current = [{ frames: newFrames, currentFrame: 0 }]
-        historyIndexRef.current = 0
-      }
-      if (e.key === "s" && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        setSaveName("")
-        setShowSaveDialog(true)
-      }
-      if (e.key === "o" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        setShowLoadDialog(true)
-      }
-      if (e.key === "c" && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+
+      // Clear current frame
+      if (e.key === "c" && !meta && !e.shiftKey && !e.altKey) {
         setFrames((prev) => {
           const updated = [...prev]
           updated[currentFrame] = createEmptyGrid(width, height)
@@ -568,10 +555,80 @@ export function PixelEditor() {
           return updated
         })
       }
+
+      // Duplicate frame after (Cmd+D)
+      if (e.key === "d" && !e.shiftKey && meta) {
+        e.preventDefault()
+        setFrames((prev) => {
+          const next = [...prev]
+          const copy = prev[currentFrame].map((row) => [...row])
+          next.splice(currentFrame + 1, 0, copy)
+          const newCurrent = currentFrame + 1
+          setCurrentFrame(newCurrent)
+          pushHistory(next, newCurrent)
+          return next
+        })
+      }
+
+      // Duplicate frame before (Cmd+Shift+D)
+      if (e.key === "d" && e.shiftKey && meta) {
+        e.preventDefault()
+        setFrames((prev) => {
+          const next = [...prev]
+          const copy = prev[currentFrame].map((row) => [...row])
+          next.splice(currentFrame, 0, copy)
+          pushHistory(next, currentFrame)
+          return next
+        })
+      }
+
+      // Delete current frame (Backspace)
+      if (e.key === "Backspace" && !meta) {
+        setFrames((prev) => {
+          if (prev.length <= 1) return prev
+          const next = prev.filter((_, i) => i !== currentFrame)
+          const newCurrent = Math.min(currentFrame, next.length - 1)
+          setCurrentFrame(newCurrent)
+          pushHistory(next, newCurrent)
+          return next
+        })
+      }
+
+      // New empty frame after current (Cmd+])
+      if (e.key === "]" && meta) {
+        e.preventDefault()
+        setFrames((prev) => {
+          const next = [...prev]
+          next.splice(currentFrame + 1, 0, createEmptyGrid(width, height))
+          const newCurrent = currentFrame + 1
+          setCurrentFrame(newCurrent)
+          pushHistory(next, newCurrent)
+          return next
+        })
+      }
+
+      // New empty frame before current (Cmd+[)
+      if (e.key === "[" && meta) {
+        e.preventDefault()
+        setFrames((prev) => {
+          const next = [...prev]
+          next.splice(currentFrame, 0, createEmptyGrid(width, height))
+          pushHistory(next, currentFrame)
+          return next
+        })
+      }
+
+      // Navigate frames (Left / Right)
+      if (e.key === "ArrowLeft" && !meta) {
+        setCurrentFrame((f) => Math.max(0, f - 1))
+      }
+      if (e.key === "ArrowRight" && !meta) {
+        setCurrentFrame((f) => Math.min(frames.length - 1, f + 1))
+      }
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [undo, redo, currentFrame, width, height, pushHistory])
+  }, [undo, redo, currentFrame, width, height, frames.length, pushHistory])
 
   const handleApplySize = useCallback(() => {
     const w = Math.max(1, Math.min(64, parseInt(inputWidth) || 16))
@@ -900,7 +957,19 @@ export function PixelEditor() {
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/></svg>
             </a>
           </div>
-{/* Zoom */}
+          {/* Ghost toggle */}
+          <button
+            onClick={handleToggleGhost}
+            className={`absolute bottom-4 left-4 flex items-center justify-center rounded border p-1.5 transition-colors backdrop-blur-sm ${
+              ghostEnabled
+                ? "border-foreground/30 bg-foreground/10 text-foreground"
+                : "border-border bg-card/80 text-muted-foreground hover:text-foreground"
+            }`}
+            title="Toggle ghost overlay"
+          >
+            <Ghost className="h-3.5 w-3.5" />
+          </button>
+          {/* Zoom */}
           <div className="absolute bottom-4 right-4 flex items-center gap-2 rounded-lg border border-border bg-card/80 px-3 py-2 backdrop-blur-sm">
             <label className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Zoom</label>
             <input

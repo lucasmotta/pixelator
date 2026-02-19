@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useCallback } from "react"
-import { Plus, Copy, Trash2, Ghost } from "lucide-react"
+import { Plus, Copy, Trash2 } from "lucide-react"
 
 interface FrameTimelineProps {
   frames: boolean[][][]
@@ -78,8 +78,9 @@ function FrameThumbnail({
 
   return (
     <button
-      onClick={onClick}
-      className={`group relative flex flex-col items-center gap-1 rounded p-1.5 transition-colors ${
+      onClick={(e) => { onClick(); (e.currentTarget as HTMLButtonElement).blur() }}
+      tabIndex={-1}
+      className={`group relative flex flex-col items-center gap-1 rounded p-1.5 transition-colors outline-none ${
         isActive
           ? "bg-accent"
           : "hover:bg-accent/50"
@@ -149,6 +150,7 @@ export function FrameTimeline({
       <div className="flex items-center gap-1 flex-shrink-0">
         <button
           onClick={onAddFrame}
+          tabIndex={-1}
           className="flex items-center justify-center rounded border border-border bg-secondary p-1.5 text-foreground transition-colors hover:bg-accent"
           title="Add frame"
         >
@@ -156,6 +158,7 @@ export function FrameTimeline({
         </button>
         <button
           onClick={onDuplicateFrame}
+          tabIndex={-1}
           className="flex items-center justify-center rounded border border-border bg-secondary p-1.5 text-foreground transition-colors hover:bg-accent"
           title="Duplicate frame"
         >
@@ -163,24 +166,12 @@ export function FrameTimeline({
         </button>
         <button
           onClick={onDeleteFrame}
+          tabIndex={-1}
           disabled={frames.length <= 1}
           className="flex items-center justify-center rounded border border-border bg-secondary p-1.5 text-foreground transition-colors hover:bg-accent disabled:opacity-30 disabled:pointer-events-none"
           title="Delete frame"
         >
           <Trash2 className="h-3.5 w-3.5" />
-        </button>
-        <div className="mx-1 h-5 w-px bg-border" />
-        <button
-          onClick={onToggleGhost}
-          className={`flex items-center gap-1.5 rounded border px-2 py-1.5 text-[11px] font-medium transition-colors ${
-            ghostEnabled
-              ? "border-foreground/30 bg-foreground/10 text-foreground"
-              : "border-border bg-secondary text-muted-foreground hover:bg-accent"
-          }`}
-          title="Toggle ghost of previous frame"
-        >
-          <Ghost className="h-3.5 w-3.5" />
-          Ghost
         </button>
         <span className="ml-2 text-[10px] font-mono text-muted-foreground">
           {currentFrame + 1}/{frames.length}
