@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import { PixelGrid } from "./pixel-grid"
 import { PixelPreview } from "./pixel-preview"
 import { FrameTimeline } from "./frame-timeline"
-import { Grid3x3, Trash2, Download, Undo2, Redo2, Code, FileCode, Save, FolderOpen, Share2, X, Check } from "lucide-react"
+import { Trash2, Download, Undo2, Redo2, Code, FileCode, Save, FolderOpen, Share2, X, Check } from "lucide-react"
 
 const STORAGE_KEY = "pixel-editor-settings"
 const SAVES_KEY = "pixel-editor-saves"
@@ -658,37 +658,7 @@ export function PixelEditor() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-border px-6 py-3">
-        <div className="flex items-center gap-2.5">
-          <Grid3x3 className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-sm font-semibold tracking-tight font-mono">
-            Pixel Editor
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={undo}
-              disabled={!canUndo}
-              className="flex items-center justify-center rounded border border-border bg-secondary p-1.5 text-foreground transition-colors hover:bg-accent disabled:opacity-30 disabled:pointer-events-none"
-              title="Undo (Z)"
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={redo}
-              disabled={!canRedo}
-              className="flex items-center justify-center rounded border border-border bg-secondary p-1.5 text-foreground transition-colors hover:bg-accent disabled:opacity-30 disabled:pointer-events-none"
-              title="Redo (Y)"
-            >
-              <Redo2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="flex flex-1 flex-col lg:flex-row overflow-hidden">
+<div className="flex flex-1 flex-col lg:flex-row overflow-hidden">
         {/* Sidebar */}
         <aside className="flex flex-row lg:flex-col items-start gap-6 border-b lg:border-b-0 lg:border-r border-border p-5 lg:w-60 flex-shrink-0">
           {/* Preview */}
@@ -821,6 +791,25 @@ export function PixelEditor() {
               onDrawEnd={handleDrawEnd}
               cellSize={cellSize}
             />
+          </div>
+          {/* Undo / Redo */}
+          <div className="absolute top-4 right-4 flex items-center gap-1">
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              className="flex items-center justify-center rounded border border-border bg-card/80 p-1.5 text-foreground backdrop-blur-sm transition-colors hover:bg-accent disabled:opacity-30 disabled:pointer-events-none"
+              title="Undo (Z)"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              className="flex items-center justify-center rounded border border-border bg-card/80 p-1.5 text-foreground backdrop-blur-sm transition-colors hover:bg-accent disabled:opacity-30 disabled:pointer-events-none"
+              title="Redo (Y)"
+            >
+              <Redo2 className="h-3.5 w-3.5" />
+            </button>
           </div>
           {/* Keyboard hints */}
           <div className="absolute bottom-4 left-4 hidden sm:flex items-center gap-1.5">
