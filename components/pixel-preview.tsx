@@ -7,6 +7,9 @@ interface PixelPreviewProps {
   height: number
   frames: boolean[][][]
   fps?: number
+  bgColor?: string
+  fgColor?: string
+  includeBg?: boolean
 }
 
 export function PixelPreview({
@@ -14,6 +17,9 @@ export function PixelPreview({
   height,
   frames,
   fps = 5,
+  bgColor = "#1a1a1a",
+  fgColor = "#e8e8e8",
+  includeBg = false,
 }: PixelPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [animFrame, setAnimFrame] = useState(0)
@@ -45,12 +51,18 @@ export function PixelPreview({
     canvas.style.width = `${width}px`
     canvas.style.height = `${height}px`
 
-    // Checkerboard background
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const isLight = (x + y) % 2 === 0
-        ctx.fillStyle = isLight ? "#2a2a2a" : "#222222"
-        ctx.fillRect(x, y, 1, 1)
+    // Background
+    if (includeBg) {
+      ctx.fillStyle = bgColor
+      ctx.fillRect(0, 0, width, height)
+    } else {
+      // Checkerboard to indicate transparency
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const isLight = (x + y) % 2 === 0
+          ctx.fillStyle = isLight ? "#2a2a2a" : "#222222"
+          ctx.fillRect(x, y, 1, 1)
+        }
       }
     }
 
@@ -58,12 +70,12 @@ export function PixelPreview({
     for (let py = 0; py < height; py++) {
       for (let px = 0; px < width; px++) {
         if (pixels[py]?.[px]) {
-          ctx.fillStyle = "#e8e8e8"
+          ctx.fillStyle = fgColor
           ctx.fillRect(px, py, 1, 1)
         }
       }
     }
-  }, [width, height, pixels])
+  }, [width, height, pixels, bgColor, fgColor, includeBg])
 
   useEffect(() => {
     draw()

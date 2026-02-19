@@ -9,6 +9,7 @@ import { encodeGIF } from "@/lib/gif-encoder"
 
 const STORAGE_KEY = "pixel-editor-settings"
 const SAVES_KEY = "pixel-editor-saves"
+const DRAFT_KEY = "pixel-editor-draft"
 const MAX_HISTORY = 100
 
 interface SavedAnimation {
@@ -18,6 +19,35 @@ interface SavedAnimation {
   frames: boolean[][][]
   fps: number
   savedAt: number
+}
+
+interface DraftState {
+  width: number
+  height: number
+  frames: boolean[][][]
+  fps: number
+  currentFrame: number
+}
+
+function loadDraft(): DraftState | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return null
+}
+
+function saveDraft(draft: DraftState) {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+  } catch {}
+}
+
+function clearDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY)
+  } catch {}
 }
 
 function loadSavedAnimations(): SavedAnimation[] {
@@ -319,6 +349,24 @@ function generateSVG(width: number, height: number, frames: boolean[][][], fps: 
   ].join('\n')
 }
 
+function cssColorToHex(color: string): string | undefined {
+  try {
+    const canvas = document.createElement("canvas")
+    canvas.width = canvas.height = 1
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return undefined
+    ctx.clearRect(0, 0, 1, 1)
+    ctx.fillStyle = "rgba(0,0,0,0)"
+    ctx.fillStyle = color
+    ctx.fillRect(0, 0, 1, 1)
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
+    if (a === 0) return undefined
+    return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")
+  } catch {
+    return undefined
+  }
+}
+
 export function PixelEditor() {
   const [mounted, setMounted] = useState(false)
   const [width, setWidth] = useState(16)
@@ -338,9 +386,12 @@ export function PixelEditor() {
   const batchingRef = useRef(false)
 
   const [fps, setFps] = useState(5)
+  const [showGIFDialog, setShowGIFDialog] = useState(false)
+  const [gifFgInput, setGifFgInput] = useState("")
+  const [gifBgInput, setGifBgInput] = useState("")
+  const [exportingGIF, setExportingGIF] = useState(false)
   const [copiedCSS, setCopiedCSS] = useState(false)
   const [copiedSVG, setCopiedSVG] = useState(false)
-  const [exportingGIF, setExportingGIF] = useState(false)
 
   // Save/Load state
   const [savedAnimations, setSavedAnimations] = useState<SavedAnimation[]>([])
@@ -366,20 +417,23 @@ export function PixelEditor() {
         initialHeight = decoded.height
         initialFrames = decoded.frames
         initialFps = decoded.fps
-        // Clear param after loading
+        clearDraft()
         window.history.replaceState(null, "", window.location.pathname)
       }
     } else {
-      // No shared link — load the most recently saved animation
-      const saves = loadSavedAnimations()
-      if (saves.length > 0) {
-        const last = saves[0]
-        initialWidth = last.width
-        initialHeight = last.height
-        initialFrames = cloneFrames(last.frames)
-        initialFps = last.fps
+      // Restore last working state from draft
+      const draft = loadDraft()
+      if (draft) {
+        initialWidth = draft.width
+        initialHeight = draft.height
+        initialFrames = draft.frames
+        initialFps = draft.fps
       }
     }
+
+    const initialCurrentFrame = px
+      ? 0
+      : (loadDraft()?.currentFrame ?? 0)
 
     setWidth(initialWidth)
     setHeight(initialHeight)
@@ -388,8 +442,8 @@ export function PixelEditor() {
     setCellSize(s.cellSize)
     setFrames(initialFrames)
     setFps(initialFps)
-    setCurrentFrame(0)
-    historyRef.current = [{ frames: initialFrames, currentFrame: 0 }]
+    setCurrentFrame(initialCurrentFrame)
+    historyRef.current = [{ frames: initialFrames, currentFrame: initialCurrentFrame }]
     historyIndexRef.current = 0
     setSavedAnimations(loadSavedAnimations())
     setMounted(true)
@@ -399,6 +453,11 @@ export function PixelEditor() {
   useEffect(() => {
     if (mounted) saveSettings(width, height, cellSize)
   }, [width, height, cellSize, mounted])
+
+  // Auto-save working draft
+  useEffect(() => {
+    if (mounted) saveDraft({ width, height, frames, fps, currentFrame })
+  }, [width, height, frames, fps, currentFrame, mounted])
 
   const pushHistory = useCallback((newFrames: boolean[][][], newCurrentFrame: number) => {
     const idx = historyIndexRef.current
@@ -471,7 +530,7 @@ export function PixelEditor() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       if (e.key === "z" && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         undo()
@@ -484,10 +543,35 @@ export function PixelEditor() {
         e.preventDefault()
         redo()
       }
+      if (e.key === "n" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        const newFrames = [createEmptyGrid(width, height)]
+        setFrames(newFrames)
+        setCurrentFrame(0)
+        historyRef.current = [{ frames: newFrames, currentFrame: 0 }]
+        historyIndexRef.current = 0
+      }
+      if (e.key === "s" && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        setSaveName("")
+        setShowSaveDialog(true)
+      }
+      if (e.key === "o" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        setShowLoadDialog(true)
+      }
+      if (e.key === "c" && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        setFrames((prev) => {
+          const updated = [...prev]
+          updated[currentFrame] = createEmptyGrid(width, height)
+          pushHistory(updated, currentFrame)
+          return updated
+        })
+      }
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [undo, redo])
+  }, [undo, redo, currentFrame, width, height, pushHistory])
 
   const handleApplySize = useCallback(() => {
     const w = Math.max(1, Math.min(64, parseInt(inputWidth) || 16))
@@ -555,7 +639,7 @@ export function PixelEditor() {
     setGhostEnabled((prev) => !prev)
   }, [])
 
-const handleExportCSS = useCallback(() => {
+  const handleExportCSS = useCallback(() => {
     const css =
       frames.length === 1
         ? generateSingleFrameCSS(width, height, frames[0])
@@ -564,21 +648,6 @@ const handleExportCSS = useCallback(() => {
       setCopiedCSS(true)
       setTimeout(() => setCopiedCSS(false), 2000)
     })
-  }, [width, height, frames, fps])
-
-  const handleExportGIF = useCallback(() => {
-    setExportingGIF(true)
-    setTimeout(() => {
-      const gif = encodeGIF(width, height, frames, fps)
-      const blob = new Blob([gif], { type: "image/gif" })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.download = `pixel-art-${width}x${height}.gif`
-      link.href = url
-      link.click()
-      URL.revokeObjectURL(url)
-      setExportingGIF(false)
-    }, 0)
   }, [width, height, frames, fps])
 
   const handleExportSVG = useCallback(() => {
@@ -743,12 +812,11 @@ const handleExportCSS = useCallback(() => {
               <span>{copiedSVG ? "Copied!" : frames.length > 1 ? "Copy Animated SVG" : "Copy SVG"}</span>
             </button>
             <button
-              onClick={handleExportGIF}
-              disabled={exportingGIF}
-              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50 disabled:pointer-events-none"
+              onClick={() => setShowGIFDialog(true)}
+              className="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
             >
               <Download className="h-3.5 w-3.5 flex-shrink-0" />
-              <span>{exportingGIF ? "Exporting…" : "Download GIF"}</span>
+              <span>Download GIF</span>
             </button>
 
             <div className="my-1 h-px w-full bg-border" />
@@ -861,6 +929,80 @@ const handleExportCSS = useCallback(() => {
         onDeleteFrame={handleDeleteFrame}
         onToggleGhost={handleToggleGhost}
       />
+
+      {/* GIF Export Dialog */}
+      {showGIFDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="flex w-64 flex-col gap-4 rounded-lg border border-border bg-card p-5 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold font-mono">Download GIF</h2>
+              <button
+                onClick={() => setShowGIFDialog(false)}
+                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex w-full items-center justify-center rounded-lg border border-border bg-secondary/40" style={{ aspectRatio: "1 / 1" }}>
+              <PixelPreview
+                width={width}
+                height={height}
+                frames={frames}
+                fps={fps}
+                fgColor={gifFgInput.trim() || "black"}
+                bgColor={gifBgInput.trim() || undefined}
+                includeBg={!!gifBgInput.trim()}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">Pixel color</label>
+                <input
+                  type="text"
+                  value={gifFgInput}
+                  onChange={(e) => setGifFgInput(e.target.value)}
+                  placeholder="black"
+                  className="h-8 rounded border border-border bg-secondary px-2.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">Background color</label>
+                <input
+                  type="text"
+                  value={gifBgInput}
+                  onChange={(e) => setGifBgInput(e.target.value)}
+                  placeholder="transparent"
+                  className="h-8 rounded border border-border bg-secondary px-2.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground"
+                />
+              </div>
+            </div>
+            <button
+              disabled={exportingGIF}
+              onClick={() => {
+                setExportingGIF(true)
+                setTimeout(() => {
+                  const fgHex = cssColorToHex(gifFgInput.trim() || "black") ?? "#000000"
+                  const bgHex = gifBgInput.trim() ? cssColorToHex(gifBgInput.trim()) : undefined
+                  const gif = encodeGIF(width, height, frames, fps, 8, fgHex, bgHex)
+                  const blob = new Blob([gif], { type: "image/gif" })
+                  const url = URL.createObjectURL(blob)
+                  const link = document.createElement("a")
+                  link.download = `pixel-art-${width}x${height}.gif`
+                  link.href = url
+                  link.click()
+                  URL.revokeObjectURL(url)
+                  setExportingGIF(false)
+                  setShowGIFDialog(false)
+                }, 0)
+              }}
+              className="flex items-center justify-center gap-2 rounded border border-border bg-foreground px-3 py-2 text-xs font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {exportingGIF ? "Exporting…" : "Download"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Save Dialog */}
       {showSaveDialog && (

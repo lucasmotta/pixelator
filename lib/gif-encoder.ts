@@ -174,22 +174,33 @@ function packSubBlocks(data: number[]): number[] {
  * @param scale   Upscale factor (default 8). Each canvas pixel becomes scale×scale GIF pixels.
  * @returns       Raw GIF byte sequence as Uint8Array.
  */
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '')
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
+}
+
 export function encodeGIF(
   width: number,
   height: number,
   frames: boolean[][][],
   fps: number,
   scale = 8,
+  fgColor = "#000000",
+  bgColor?: string,
 ): Uint8Array {
   const out = new ByteStream();
 
   const gifWidth  = width  * scale;
   const gifHeight = height * scale;
 
+  const [fgR, fgG, fgB] = hexToRgb(fgColor)
+  const hasBg = bgColor !== undefined
+  const bgRgb = hasBg ? hexToRgb(bgColor!) : [0, 0, 0]
+
   // ---- Constants ---------------------------------------------------------
-  const MIN_CODE_SIZE  = 2;
-  const TRANSPARENT_IDX = 0;
-  const BLACK_IDX       = 1;
+  const MIN_CODE_SIZE   = 2;
+  const TRANSPARENT_IDX = 0;  // index 0: transparent (or bg when hasBg)
+  const FG_IDX          = 1;  // index 1: foreground pixel color
 
   // Frame delay in GIF centiseconds (1/100 s units).
   const safeFps = Math.max(1, Math.min(100, fps));
@@ -216,10 +227,10 @@ export function encodeGIF(
   out.byte(0);  // Pixel Aspect Ratio (0 = square)
 
   // ---- Global Color Table (4 × 3 = 12 bytes) -----------------------------
-  // Entry 0: transparent placeholder — use black but will be made transparent
-  out.bytes([0x00, 0x00, 0x00]);
-  // Entry 1: black (the drawn colour)
-  out.bytes([0x00, 0x00, 0x00]);
+  // Entry 0: bg color (used as transparent when !hasBg)
+  out.bytes(bgRgb);
+  // Entry 1: foreground pixel color
+  out.bytes([fgR, fgG, fgB]);
   // Entries 2-3: unused filler
   out.bytes([0xff, 0xff, 0xff]);
   out.bytes([0xff, 0xff, 0xff]);
@@ -248,10 +259,11 @@ export function encodeGIF(
     //                This ensures transparent areas are cleared between frames.
     //     bit 1    : User Input Flag = 0
     //     bit 0    : Transparent Color Flag = 1
-    out.byte(0b00001001); // disposal=2, transparent=1
+    // bit 0 = transparent flag: only set when background is transparent
+    out.byte(hasBg ? 0b00001000 : 0b00001001);
 
-    out.word(frameDelay);     // Delay time (centiseconds)
-    out.byte(TRANSPARENT_IDX); // Transparent Color Index
+    out.word(frameDelay);      // Delay time (centiseconds)
+    out.byte(TRANSPARENT_IDX); // Transparent Color Index (ignored when hasBg)
     out.byte(0x00);            // Block terminator
 
     // -- Image Descriptor (10 bytes) ----------------------------------------
@@ -277,7 +289,7 @@ export function encodeGIF(
       const row = frame[y];
       for (let sy = 0; sy < scale; sy++) {
         for (let x = 0; x < width; x++) {
-          const idx = row?.[x] ? BLACK_IDX : TRANSPARENT_IDX;
+          const idx = row?.[x] ? FG_IDX : TRANSPARENT_IDX;
           for (let sx = 0; sx < scale; sx++) {
             pixels[p++] = idx;
           }
