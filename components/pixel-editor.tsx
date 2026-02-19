@@ -50,33 +50,6 @@ function generateCssGradient(
   height: number,
   pixels: boolean[][]
 ): string {
-  // Build a linear-gradient that draws each row as a 1px band
-  // Each row uses color stops to paint filled/empty pixels
-  const lines: string[] = []
-
-  for (let y = 0; y < height; y++) {
-    // For each row, generate horizontal color stops
-    let x = 0
-    while (x < width) {
-      const filled = pixels[y]?.[x] ?? false
-      const startX = x
-      // Group consecutive same-state pixels
-      while (x < width && (pixels[y]?.[x] ?? false) === filled) {
-        x++
-      }
-      if (filled) {
-        const left = ((startX / width) * 100).toFixed(4)
-        const right = ((x / width) * 100).toFixed(4)
-        lines.push(
-          `linear-gradient(to right, transparent ${left}%, #000 ${left}%, #000 ${right}%, transparent ${right}%)`
-        )
-      }
-    }
-  }
-
-  if (lines.length === 0) return "/* Empty canvas — no filled pixels */"
-
-  // Use background with multiple gradients, each row positioned vertically
   const bgImages: string[] = []
   const bgPositions: string[] = []
   const bgSizes: string[] = []
@@ -90,10 +63,8 @@ function generateCssGradient(
         x++
       }
       if (filled) {
-        const left = ((startX / width) * 100).toFixed(4)
-        const right = ((x / width) * 100).toFixed(4)
         bgImages.push(
-          `linear-gradient(to right, transparent ${left}%, #000 ${left}%, #000 ${right}%, transparent ${right}%)`
+          `linear-gradient(to right, transparent ${startX}px, var(--pixel-color) ${startX}px, var(--pixel-color) ${x}px, transparent ${x}px)`
         )
         bgPositions.push(`0 ${y}px`)
         bgSizes.push(`${width}px 1px`)
@@ -101,7 +72,10 @@ function generateCssGradient(
     }
   }
 
+  if (bgImages.length === 0) return "/* Empty canvas — no filled pixels */"
+
   return [
+    `--pixel-color: currentColor;`,
     `width: ${width}px;`,
     `height: ${height}px;`,
     `background-image:`,
