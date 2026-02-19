@@ -7,6 +7,8 @@ interface PixelGridProps {
   height: number
   pixels: boolean[][]
   onPixelsChange: (pixels: boolean[][]) => void
+  onDrawStart?: () => void
+  onDrawEnd?: (pixels: boolean[][]) => void
   cellSize?: number
 }
 
@@ -47,6 +49,8 @@ export function PixelGrid({
   height,
   pixels,
   onPixelsChange,
+  onDrawStart,
+  onDrawEnd,
   cellSize = 24,
 }: PixelGridProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -58,6 +62,8 @@ export function PixelGrid({
     null
   )
   const lastCell = useRef<[number, number] | null>(null)
+  const pixelsRef = useRef(pixels)
+  pixelsRef.current = pixels
 
   const gridLineColor = "rgba(255, 255, 255, 0.06)"
   const filledColor = "#e8e8e8"
@@ -163,24 +169,13 @@ export function PixelGrid({
     [pixels, onPixelsChange]
   )
 
-  const setPixels = useCallback(
-    (points: [number, number][], value: boolean) => {
-      const next = pixels.map((row) => [...row])
-      for (const [x, y] of points) {
-        if (x >= 0 && x < width && y >= 0 && y < height) {
-          next[y][x] = value
-        }
-      }
-      onPixelsChange(next)
-    },
-    [pixels, onPixelsChange, width, height]
-  )
-
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       e.preventDefault()
       const cell = getCellFromEvent(e)
       if (!cell) return
+
+      onDrawStart?.()
 
       const erasing = e.altKey
       isErasing.current = erasing
@@ -198,7 +193,7 @@ export function PixelGrid({
       lastCell.current = cell
       setPixel(cell[0], cell[1], !erasing)
     },
-    [getCellFromEvent, setPixel]
+    [getCellFromEvent, setPixel, onDrawStart]
   )
 
   const handleMouseMove = useCallback(
@@ -242,14 +237,24 @@ export function PixelGrid({
 
   const handleMouseUp = useCallback(() => {
     if (isShiftMode.current && lineStart.current && linePreview) {
-      setPixels(linePreview, !isErasing.current)
+      const value = !isErasing.current
+      const next = pixelsRef.current.map((row) => [...row])
+      for (const [x, y] of linePreview) {
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+          next[y][x] = value
+        }
+      }
+      onPixelsChange(next)
       setLinePreview(null)
       lineStart.current = null
+      onDrawEnd?.(next)
+    } else if (isDrawing.current) {
+      onDrawEnd?.(pixelsRef.current)
     }
     isDrawing.current = false
     isShiftMode.current = false
     lastCell.current = null
-  }, [linePreview, setPixels])
+  }, [linePreview, onPixelsChange, onDrawEnd, width, height])
 
   // Listen for global mouseup to handle release outside canvas
   useEffect(() => {

@@ -1,24 +1,233 @@
 "use client"
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { PixelGrid } from "./pixel-grid"
 import { PixelPreview } from "./pixel-preview"
-import { Grid3x3, Trash2, Download } from "lucide-react"
+import { Grid3x3, Trash2, Download, Undo2, Redo2, Code } from "lucide-react"
+
+const STORAGE_KEY = "pixel-editor-settings"
+const MAX_HISTORY = 100
 
 function createEmptyGrid(w: number, h: number): boolean[][] {
   return Array.from({ length: h }, () => Array(w).fill(false))
 }
 
+function loadSettings(): { width: number; height: number; cellSize: number } {
+  if (typeof window === "undefined") return { width: 16, height: 16, cellSize: 24 }
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      return {
+        width: Math.max(1, Math.min(64, parsed.width ?? 16)),
+        height: Math.max(1, Math.min(64, parsed.height ?? 16)),
+        cellSize: Math.max(8, Math.min(48, parsed.cellSize ?? 24)),
+      }
+    }
+  } catch {}
+  return { width: 16, height: 16, cellSize: 24 }
+}
+
+function saveSettings(width: number, height: number, cellSize: number) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ width, height, cellSize }))
+  } catch {}
+}
+
+function gridsEqual(a: boolean[][], b: boolean[][]): boolean {
+  if (a.length !== b.length) return false
+  for (let y = 0; y < a.length; y++) {
+    if (a[y].length !== b[y].length) return false
+    for (let x = 0; x < a[y].length; x++) {
+      if (a[y][x] !== b[y][x]) return false
+    }
+  }
+  return true
+}
+
+function generateCssGradient(
+  width: number,
+  height: number,
+  pixels: boolean[][]
+): string {
+  // Build a linear-gradient that draws each row as a 1px band
+  // Each row uses color stops to paint filled/empty pixels
+  const lines: string[] = []
+
+  for (let y = 0; y < height; y++) {
+    // For each row, generate horizontal color stops
+    let x = 0
+    while (x < width) {
+      const filled = pixels[y]?.[x] ?? false
+      const startX = x
+      // Group consecutive same-state pixels
+      while (x < width && (pixels[y]?.[x] ?? false) === filled) {
+        x++
+      }
+      if (filled) {
+        const left = ((startX / width) * 100).toFixed(4)
+        const right = ((x / width) * 100).toFixed(4)
+        lines.push(
+          `linear-gradient(to right, transparent ${left}%, #000 ${left}%, #000 ${right}%, transparent ${right}%)`
+        )
+      }
+    }
+  }
+
+  if (lines.length === 0) return "/* Empty canvas — no filled pixels */"
+
+  // Use background with multiple gradients, each row positioned vertically
+  const bgImages: string[] = []
+  const bgPositions: string[] = []
+  const bgSizes: string[] = []
+
+  for (let y = 0; y < height; y++) {
+    let x = 0
+    while (x < width) {
+      const filled = pixels[y]?.[x] ?? false
+      const startX = x
+      while (x < width && (pixels[y]?.[x] ?? false) === filled) {
+        x++
+      }
+      if (filled) {
+        const left = ((startX / width) * 100).toFixed(4)
+        const right = ((x / width) * 100).toFixed(4)
+        bgImages.push(
+          `linear-gradient(to right, transparent ${left}%, #000 ${left}%, #000 ${right}%, transparent ${right}%)`
+        )
+        bgPositions.push(`0 ${y}px`)
+        bgSizes.push(`${width}px 1px`)
+      }
+    }
+  }
+
+  return [
+    `width: ${width}px;`,
+    `height: ${height}px;`,
+    `background-image:`,
+    `  ${bgImages.join(",\n  ")};`,
+    `background-position:`,
+    `  ${bgPositions.join(",\n  ")};`,
+    `background-size:`,
+    `  ${bgSizes.join(",\n  ")};`,
+    `background-repeat: no-repeat;`,
+  ].join("\n")
+}
+
 export function PixelEditor() {
+  const [mounted, setMounted] = useState(false)
   const [width, setWidth] = useState(16)
   const [height, setHeight] = useState(16)
   const [inputWidth, setInputWidth] = useState("16")
   const [inputHeight, setInputHeight] = useState("16")
-  const [pixels, setPixels] = useState<boolean[][]>(() =>
-    createEmptyGrid(16, 16)
-  )
+  const [pixels, setPixels] = useState<boolean[][]>(() => createEmptyGrid(16, 16))
   const [cellSize, setCellSize] = useState(24)
-  const exportCanvasRef = useRef<HTMLCanvasElement>(null)
+
+  // Undo / Redo
+  const historyRef = useRef<boolean[][][]>([])
+  const historyIndexRef = useRef(-1)
+  const batchingRef = useRef(false)
+
+  // Initialize from localStorage after mount
+  useEffect(() => {
+    const s = loadSettings()
+    setWidth(s.width)
+    setHeight(s.height)
+    setInputWidth(String(s.width))
+    setInputHeight(String(s.height))
+    setCellSize(s.cellSize)
+    const grid = createEmptyGrid(s.width, s.height)
+    setPixels(grid)
+    historyRef.current = [grid]
+    historyIndexRef.current = 0
+    setMounted(true)
+  }, [])
+
+  // Persist settings
+  useEffect(() => {
+    if (mounted) saveSettings(width, height, cellSize)
+  }, [width, height, cellSize, mounted])
+
+  const pushHistory = useCallback((grid: boolean[][]) => {
+    const idx = historyIndexRef.current
+    // Don't push if identical to current
+    if (idx >= 0 && gridsEqual(historyRef.current[idx], grid)) return
+
+    // Truncate any redo states ahead
+    historyRef.current = historyRef.current.slice(0, idx + 1)
+    historyRef.current.push(grid)
+    if (historyRef.current.length > MAX_HISTORY) {
+      historyRef.current.shift()
+    }
+    historyIndexRef.current = historyRef.current.length - 1
+  }, [])
+
+  const handlePixelsChange = useCallback(
+    (next: boolean[][]) => {
+      setPixels(next)
+      if (!batchingRef.current) {
+        pushHistory(next)
+      }
+    },
+    [pushHistory]
+  )
+
+  const handleDrawStart = useCallback(() => {
+    batchingRef.current = true
+  }, [])
+
+  const handleDrawEnd = useCallback(
+    (finalPixels: boolean[][]) => {
+      batchingRef.current = false
+      pushHistory(finalPixels)
+    },
+    [pushHistory]
+  )
+
+  const undo = useCallback(() => {
+    const idx = historyIndexRef.current
+    if (idx > 0) {
+      historyIndexRef.current = idx - 1
+      setPixels(historyRef.current[idx - 1])
+    }
+  }, [])
+
+  const redo = useCallback(() => {
+    const idx = historyIndexRef.current
+    if (idx < historyRef.current.length - 1) {
+      historyIndexRef.current = idx + 1
+      setPixels(historyRef.current[idx + 1])
+    }
+  }, [])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // z = undo, y = redo (no modifier required per spec)
+      if (
+        e.key === "z" &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !(e.target instanceof HTMLInputElement)
+      ) {
+        e.preventDefault()
+        undo()
+      }
+      if (
+        e.key === "y" &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !(e.target instanceof HTMLInputElement)
+      ) {
+        e.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [undo, redo])
 
   const handleApplySize = useCallback(() => {
     const w = Math.max(1, Math.min(64, parseInt(inputWidth) || 16))
@@ -28,7 +237,6 @@ export function PixelEditor() {
     setInputWidth(String(w))
     setInputHeight(String(h))
 
-    // Preserve existing pixels where possible
     const newGrid = createEmptyGrid(w, h)
     for (let y = 0; y < Math.min(h, pixels.length); y++) {
       for (let x = 0; x < Math.min(w, pixels[y]?.length ?? 0); x++) {
@@ -36,11 +244,14 @@ export function PixelEditor() {
       }
     }
     setPixels(newGrid)
-  }, [inputWidth, inputHeight, pixels])
+    pushHistory(newGrid)
+  }, [inputWidth, inputHeight, pixels, pushHistory])
 
   const handleClear = useCallback(() => {
-    setPixels(createEmptyGrid(width, height))
-  }, [width, height])
+    const grid = createEmptyGrid(width, height)
+    setPixels(grid)
+    pushHistory(grid)
+  }, [width, height, pushHistory])
 
   const handleExport = useCallback(() => {
     const canvas = document.createElement("canvas")
@@ -49,13 +260,11 @@ export function PixelEditor() {
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    // Transparent background
     ctx.clearRect(0, 0, width, height)
-
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         if (pixels[y]?.[x]) {
-          ctx.fillStyle = "#e8e8e8"
+          ctx.fillStyle = "#000000"
           ctx.fillRect(x, y, 1, 1)
         }
       }
@@ -67,14 +276,27 @@ export function PixelEditor() {
     link.click()
   }, [width, height, pixels])
 
+  const handleExportCSS = useCallback(() => {
+    const css = generateCssGradient(width, height, pixels)
+    navigator.clipboard.writeText(css).then(() => {
+      setCopiedCSS(true)
+      setTimeout(() => setCopiedCSS(false), 2000)
+    })
+  }, [width, height, pixels])
+
+  const [copiedCSS, setCopiedCSS] = useState(false)
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        handleApplySize()
-      }
+      if (e.key === "Enter") handleApplySize()
     },
     [handleApplySize]
   )
+
+  if (!mounted) return null
+
+  const canUndo = historyIndexRef.current > 0
+  const canRedo = historyIndexRef.current < historyRef.current.length - 1
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -86,16 +308,36 @@ export function PixelEditor() {
             Pixel Editor
           </h1>
         </div>
-        <div className="flex items-center gap-2">
-          <kbd className="hidden sm:inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-            Click to draw
-          </kbd>
-          <kbd className="hidden sm:inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-            Opt to erase
-          </kbd>
-          <kbd className="hidden sm:inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-            Shift for line
-          </kbd>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              className="flex items-center justify-center rounded border border-border bg-secondary p-1.5 text-foreground transition-colors hover:bg-accent disabled:opacity-30 disabled:pointer-events-none"
+              title="Undo (Z)"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              className="flex items-center justify-center rounded border border-border bg-secondary p-1.5 text-foreground transition-colors hover:bg-accent disabled:opacity-30 disabled:pointer-events-none"
+              title="Redo (Y)"
+            >
+              <Redo2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="hidden sm:flex items-center gap-2">
+            <kbd className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+              Opt: erase
+            </kbd>
+            <kbd className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+              Shift: line
+            </kbd>
+            <kbd className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+              Z / Y: undo/redo
+            </kbd>
+          </div>
         </div>
       </header>
 
@@ -118,9 +360,7 @@ export function PixelEditor() {
                 onKeyDown={handleKeyDown}
                 className="h-8 w-16 rounded border border-border bg-secondary px-2 text-center text-sm font-mono text-foreground outline-none focus:ring-1 focus:ring-ring"
               />
-              <span className="text-xs text-muted-foreground font-mono">
-                x
-              </span>
+              <span className="text-xs text-muted-foreground font-mono">x</span>
               <input
                 type="number"
                 min={1}
@@ -160,11 +400,7 @@ export function PixelEditor() {
             <label className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
               Preview ({width}x{height})
             </label>
-            <PixelPreview
-              width={width}
-              height={height}
-              pixels={pixels}
-            />
+            <PixelPreview width={width} height={height} pixels={pixels} />
           </div>
 
           {/* Actions */}
@@ -183,6 +419,13 @@ export function PixelEditor() {
               <Download className="h-3.5 w-3.5" />
               Export PNG
             </button>
+            <button
+              onClick={handleExportCSS}
+              className="flex items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <Code className="h-3.5 w-3.5" />
+              {copiedCSS ? "Copied!" : "Copy CSS"}
+            </button>
           </div>
         </aside>
 
@@ -193,14 +436,14 @@ export function PixelEditor() {
               width={width}
               height={height}
               pixels={pixels}
-              onPixelsChange={setPixels}
+              onPixelsChange={handlePixelsChange}
+              onDrawStart={handleDrawStart}
+              onDrawEnd={handleDrawEnd}
               cellSize={cellSize}
             />
           </div>
         </main>
       </div>
-
-      <canvas ref={exportCanvasRef} className="hidden" />
     </div>
   )
 }
