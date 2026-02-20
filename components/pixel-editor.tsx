@@ -665,28 +665,106 @@ export function PixelEditor() {
     })
   }, [currentFrame, width, height, pushHistory])
 
-  const handleDuplicateFrame = useCallback(() => {
+  const handleClearFrame = useCallback((index: number) => {
+    setFrames((prev) => {
+      if (!prev[index]) return prev
+      const newFrames = [...prev]
+      newFrames[index] = createEmptyGrid(width, height)
+      pushHistory(newFrames, currentFrame)
+      return newFrames
+    })
+  }, [width, height, pushHistory, currentFrame])
+
+  const handleDuplicateFrame = useCallback((index: number) => {
     setFrames((prev) => {
       const newFrames = [...prev]
-      const copy = prev[currentFrame].map((row) => [...row])
-      newFrames.splice(currentFrame + 1, 0, copy)
-      const newCurrent = currentFrame + 1
+      if (!prev[index]) return prev
+      const copy = prev[index].map((row) => [...row])
+      newFrames.splice(index + 1, 0, copy)
+      const newCurrent = index + 1
+      setCurrentFrame(newCurrent)
+      pushHistory(newFrames, newCurrent)
+      return newFrames
+    })
+  }, [pushHistory])
+
+  const handleDeleteFrame = useCallback((index: number) => {
+    setFrames((prev) => {
+      if (prev.length <= 1) return prev
+      const newFrames = prev.filter((_, i) => i !== index)
+      let newCurrent = currentFrame
+      if (currentFrame === index) {
+        newCurrent = Math.min(index, newFrames.length - 1)
+      } else if (currentFrame > index) {
+        newCurrent = currentFrame - 1
+      }
       setCurrentFrame(newCurrent)
       pushHistory(newFrames, newCurrent)
       return newFrames
     })
   }, [currentFrame, pushHistory])
 
-  const handleDeleteFrame = useCallback(() => {
-    if (frames.length <= 1) return
+  const handleFlipVerticalFrame = useCallback((index: number) => {
     setFrames((prev) => {
-      const newFrames = prev.filter((_, i) => i !== currentFrame)
-      const newCurrent = Math.min(currentFrame, newFrames.length - 1)
-      setCurrentFrame(newCurrent)
-      pushHistory(newFrames, newCurrent)
+      const frame = prev[index]
+      if (!frame) return prev
+      const flipped = [...frame].reverse().map((row) => [...row])
+      const newFrames = [...prev]
+      newFrames[index] = flipped
+      pushHistory(newFrames, currentFrame)
       return newFrames
     })
-  }, [currentFrame, frames.length, pushHistory])
+  }, [pushHistory, currentFrame])
+
+  const handleFlipHorizontalFrame = useCallback((index: number) => {
+    setFrames((prev) => {
+      const frame = prev[index]
+      if (!frame) return prev
+      const flipped = frame.map((row) => [...row].reverse())
+      const newFrames = [...prev]
+      newFrames[index] = flipped
+      pushHistory(newFrames, currentFrame)
+      return newFrames
+    })
+  }, [pushHistory, currentFrame])
+
+  const handleRotateCwFrame = useCallback((index: number) => {
+    setFrames((prev) => {
+      const frame = prev[index]
+      if (!frame) return prev
+      const rotated = createEmptyGrid(width, height)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const srcY = height - 1 - x
+          const srcX = y
+          rotated[y][x] = frame[srcY]?.[srcX] ?? false
+        }
+      }
+      const newFrames = [...prev]
+      newFrames[index] = rotated
+      pushHistory(newFrames, currentFrame)
+      return newFrames
+    })
+  }, [width, height, pushHistory, currentFrame])
+
+  const handleRotateCcwFrame = useCallback((index: number) => {
+    setFrames((prev) => {
+      const frame = prev[index]
+      if (!frame) return prev
+      const rotated = createEmptyGrid(width, height)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const srcY = x
+          const srcX = width - 1 - y
+          rotated[y][x] = frame[srcY]?.[srcX] ?? false
+        }
+      }
+      const newFrames = [...prev]
+      newFrames[index] = rotated
+      pushHistory(newFrames, currentFrame)
+      return newFrames
+    })
+  }, [width, height, pushHistory, currentFrame])
 
   const handleSelectFrame = useCallback((index: number) => {
     setCurrentFrame(index)
@@ -994,8 +1072,13 @@ export function PixelEditor() {
         ghostEnabled={ghostEnabled}
         onSelectFrame={handleSelectFrame}
         onAddFrame={handleAddFrame}
+        onClearFrame={handleClearFrame}
         onDuplicateFrame={handleDuplicateFrame}
         onDeleteFrame={handleDeleteFrame}
+        onFlipVerticalFrame={handleFlipVerticalFrame}
+        onFlipHorizontalFrame={handleFlipHorizontalFrame}
+        onRotateCwFrame={handleRotateCwFrame}
+        onRotateCcwFrame={handleRotateCcwFrame}
         onToggleGhost={handleToggleGhost}
       />
 
