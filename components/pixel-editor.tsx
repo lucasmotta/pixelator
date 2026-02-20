@@ -766,6 +766,20 @@ export function PixelEditor() {
     })
   }, [width, height, pushHistory, currentFrame])
 
+  const handleReorderFrames = useCallback((nextFrames: boolean[][][]) => {
+    setFrames((prev) => {
+      if (prev.length !== nextFrames.length) return prev
+      const isSameOrder = prev.every((frame, i) => frame === nextFrames[i])
+      if (isSameOrder) return prev
+
+      const selectedFrame = prev[currentFrame]
+      const nextCurrent = Math.max(0, nextFrames.indexOf(selectedFrame))
+      setCurrentFrame(nextCurrent)
+      pushHistory(nextFrames, nextCurrent)
+      return nextFrames
+    })
+  }, [currentFrame, pushHistory])
+
   const handleSelectFrame = useCallback((index: number) => {
     setCurrentFrame(index)
   }, [])
@@ -1079,6 +1093,7 @@ export function PixelEditor() {
         onFlipHorizontalFrame={handleFlipHorizontalFrame}
         onRotateCwFrame={handleRotateCwFrame}
         onRotateCcwFrame={handleRotateCcwFrame}
+        onReorderFrames={handleReorderFrames}
         onToggleGhost={handleToggleGhost}
       />
 

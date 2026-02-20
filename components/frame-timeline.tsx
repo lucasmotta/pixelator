@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
+import { Reorder } from "motion/react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -30,6 +31,7 @@ interface FrameTimelineProps {
   onFlipHorizontalFrame: (index: number) => void;
   onRotateCwFrame: (index: number) => void;
   onRotateCcwFrame: (index: number) => void;
+  onReorderFrames: (nextFrames: boolean[][][]) => void;
   onToggleGhost: () => void;
 }
 
@@ -203,9 +205,20 @@ export function FrameTimeline({
   onFlipHorizontalFrame,
   onRotateCwFrame,
   onRotateCcwFrame,
+  onReorderFrames,
   onToggleGhost,
 }: FrameTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const frameIdsRef = useRef(new WeakMap<boolean[][], number>());
+  const nextFrameIdRef = useRef(0);
+
+  const getFrameId = useCallback((frame: boolean[][]) => {
+    const existing = frameIdsRef.current.get(frame);
+    if (existing !== undefined) return existing;
+    const id = nextFrameIdRef.current++;
+    frameIdsRef.current.set(frame, id);
+    return id;
+  }, []);
 
   // Scroll to keep current frame visible when it changes
   useEffect(() => {
@@ -226,30 +239,40 @@ export function FrameTimeline({
   return (
     <div className="flex items-center gap-3 border-t border-border bg-card px-4 py-3">
       {/* Frame thumbnails */}
-      <div
+      <Reorder.Group
+        axis="x"
+        values={frames}
+        onReorder={onReorderFrames}
+        as="div"
         ref={scrollRef}
         className="flex items-center gap-1.5 overflow-x-auto flex-1 min-w-0 py-1"
       >
         {frames.map((frame, i) => (
-          <FrameThumbnail
-            key={i}
-            pixels={frame}
-            width={width}
-            height={height}
-            isActive={i === currentFrame}
-            index={i}
-            canDelete={frames.length > 1}
-            onClick={() => onSelectFrame(i)}
-            onClear={() => onClearFrame(i)}
-            onDuplicate={() => onDuplicateFrame(i)}
-            onDelete={() => onDeleteFrame(i)}
-            onFlipVertical={() => onFlipVerticalFrame(i)}
-            onFlipHorizontal={() => onFlipHorizontalFrame(i)}
-            onRotateCw={() => onRotateCwFrame(i)}
-            onRotateCcw={() => onRotateCcwFrame(i)}
-          />
+          <Reorder.Item
+            as="div"
+            key={getFrameId(frame)}
+            value={frame}
+            className="shrink-0"
+          >
+            <FrameThumbnail
+              pixels={frame}
+              width={width}
+              height={height}
+              isActive={i === currentFrame}
+              index={i}
+              canDelete={frames.length > 1}
+              onClick={() => onSelectFrame(i)}
+              onClear={() => onClearFrame(i)}
+              onDuplicate={() => onDuplicateFrame(i)}
+              onDelete={() => onDeleteFrame(i)}
+              onFlipVertical={() => onFlipVerticalFrame(i)}
+              onFlipHorizontal={() => onFlipHorizontalFrame(i)}
+              onRotateCw={() => onRotateCwFrame(i)}
+              onRotateCcw={() => onRotateCcwFrame(i)}
+            />
+          </Reorder.Item>
         ))}
-      </div>
+      </Reorder.Group>
 
       {/* Controls */}
       <div className="flex items-center gap-1 flex-shrink-0">
